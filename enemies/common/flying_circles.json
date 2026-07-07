@@ -1,0 +1,153 @@
+{
+    "body": {
+        "template": "forms.rect",
+        "w": 30,
+        "h": 30
+    },
+    "movement": {
+        "type": "patrol",
+        "speed": 2.2,
+        "range_x": 70
+    },
+    "detection": {
+        "template": "detections.radius_view",
+        "shape": {
+            "template": "forms.circle",
+            "r": 225
+        },
+        "offset_x": 0,
+        "offset_y": 0
+    },
+    "sequences": [
+        {
+            "name": "Seq 1",
+            "chance": 0.5,
+            "cooldown": 120,
+            "trigger_zone": {
+                "shape": {
+                    "template": "forms.circle",
+                    "type": "circle",
+                    "r": 85
+                },
+                "offset_x": 0,
+                "offset_y": 0,
+                "type": "following",
+                "hold_time": 0,
+                "consecutive_limit": 3,
+                "accumulate_hold": true
+            },
+            "steps": [
+                {
+                    "type": "attack",
+                    "idx": 0,
+                    "trigger": "time",
+                    "delay": 0
+                }
+            ]
+        },
+        {
+            "name": "Seq 2",
+            "chance": 0.5,
+            "cooldown": 180,
+            "trigger_zone": {
+                "shape": {
+                    "template": "forms.circle",
+                    "type": "circle",
+                    "r": 175
+                },
+                "offset_x": 0,
+                "offset_y": 0,
+                "type": "following",
+                "hold_time": 40,
+                "consecutive_limit": 3,
+                "accumulate_hold": true
+            },
+            "steps": [
+                {
+                    "type": "projectile",
+                    "idx": 0,
+                    "delay": 0
+                }
+            ]
+        }
+    ],
+    "attacks": [
+        {
+            "name": "Bite",
+            "chance": 1.0,
+            "shape": {
+                "template": "forms.rect",
+                "w": 45,
+                "h": 45
+            },
+            "offset_x": 5,
+            "offset_y": -5,
+            "cooldown": 40,
+            "damage": 1,
+            "shapes": [
+                {
+                    "shape": {
+                        "template": "forms.circle",
+                        "type": "circle",
+                        "r": 130
+                    },
+                    "offset_x": 0,
+                    "offset_y": 0,
+                    "angle": 0,
+                    "delay": 0,
+                    "duration": 10,
+                    "damage": 1,
+                    "kb_angle": -45,
+                    "kb_force": 18.0,
+                    "sprite_dir": "forward",
+                    "kb_angle_hit": -45,
+                    "kb_force_hit": 18.0,
+                    "kb_angle_parry": -45,
+                    "kb_force_parry": 9.0
+                },
+                {
+                    "shape": {
+                        "template": "forms.circle",
+                        "type": "circle",
+                        "r": 125
+                    },
+                    "offset_x": 0,
+                    "offset_y": 0,
+                    "angle": 0,
+                    "delay": 30,
+                    "duration": 10,
+                    "damage": 1,
+                    "kb_angle": 0,
+                    "kb_force": 12.0,
+                    "sprite_dir": "forward",
+                    "kb_angle_hit": 0,
+                    "kb_force_hit": 12.0,
+                    "kb_angle_parry": 0,
+                    "kb_force_parry": 6.0
+                }
+            ],
+            "windup": 30
+        }
+    ],
+    "movements": [],
+    "movement_config": {
+        "type_move": "flying",
+        "speed": 2.4,
+        "range_x": 120,
+        "stop_dist": 60,
+        "patrol_on_platform": false
+    },
+    "flows": [],
+    "projectiles": [
+        {
+            "name": "Proj Template 1",
+            "speed": 7.0,
+            "angle": 0.0,
+            "gravity": 0.0,
+            "damage": 1,
+            "radius": 8,
+            "aim_at_player": true,
+            "homing": 0.1
+        }
+    ]
+}

@@ -1,0 +1,437 @@
+{
+    "hp": 20,
+    "body": {
+        "template": "forms.rect",
+        "w": 40,
+        "h": 60
+    },
+    "movement_config": {
+        "type_move": "walking",
+        "speed": 1.2,
+        "range_x": 340,
+        "patrol_on_platform": false,
+        "stop_dist": 20
+    },
+    "detection": {
+        "template": "detections.front_view",
+        "shape": {
+            "template": "forms.rect",
+            "w": 340,
+            "h": 185
+        },
+        "offset_x": -175,
+        "offset_y": -45
+    },
+    "attacks": [
+        {
+            "name": "Atk 1-1",
+            "cooldown": 50,
+            "windup": 35,
+            "shapes": [
+                {
+                    "shape": {
+                        "template": "forms.rect",
+                        "w": 115,
+                        "h": 60
+                    },
+                    "offset_x": 105,
+                    "offset_y": -5,
+                    "angle": 0,
+                    "delay": 0,
+                    "duration": 10,
+                    "damage": 1,
+                    "kb_angle": 75,
+                    "kb_force": 17.0,
+                    "sprite_dir": "forward",
+                    "kb_angle_hit": 75,
+                    "kb_force_hit": 1.0,
+                    "kb_angle_parry": 75,
+                    "kb_force_parry": 10.5
+                }
+            ]
+        },
+        {
+            "name": "Atk 1-2",
+            "cooldown": 50,
+            "windup": 35,
+            "shapes": [
+                {
+                    "shape": {
+                        "template": "forms.rect",
+                        "w": 150,
+                        "h": 125
+                    },
+                    "offset_x": 70,
+                    "offset_y": 55,
+                    "angle": -60,
+                    "delay": 0,
+                    "duration": 10,
+                    "damage": 1,
+                    "kb_angle": -30,
+                    "kb_force": 12.0,
+                    "sprite_dir": "forward",
+                    "kb_angle_hit": -30,
+                    "kb_force_hit": 12.0,
+                    "kb_angle_parry": -30,
+                    "kb_force_parry": 6.0
+                }
+            ]
+        },
+        {
+            "name": "Atk 2",
+            "cooldown": 20,
+            "windup": 25,
+            "shapes": [
+                {
+                    "shape": {
+                        "template": "forms.rect",
+                        "w": 335,
+                        "h": 150
+                    },
+                    "offset_x": 25,
+                    "offset_y": -35,
+                    "angle": 0,
+                    "delay": 0,
+                    "duration": 10,
+                    "damage": 1,
+                    "kb_angle": 0,
+                    "kb_force": 12.0,
+                    "sprite_dir": "forward",
+                    "visual_box": {
+                        "type": "rectangle",
+                        "w": 205,
+                        "h": 150,
+                        "r": 0,
+                        "offset_x": 90,
+                        "offset_y": -35
+                    },
+                    "kb_angle_hit": 0,
+                    "kb_force_hit": 12.0,
+                    "kb_angle_parry": 0,
+                    "kb_force_parry": 6.0
+                }
+            ]
+        },
+        {
+            "name": "Atk chase",
+            "cooldown": 50,
+            "windup": 35,
+            "shapes": [
+                {
+                    "shape": {
+                        "template": "forms.rect",
+                        "w": 470,
+                        "h": 40
+                    },
+                    "offset_x": 200,
+                    "offset_y": -5,
+                    "angle": 0,
+                    "delay": 0,
+                    "duration": 10,
+                    "damage": 1,
+                    "kb_angle": 0,
+                    "kb_force": 12.0,
+                    "sprite_dir": "forward",
+                    "visual_box": {
+                        "type": "rectangle",
+                        "w": 390,
+                        "h": 40,
+                        "r": 0,
+                        "offset_x": 240,
+                        "offset_y": -5
+                    },
+                    "kb_angle_hit": 0,
+                    "kb_force_hit": 12.0,
+                    "kb_angle_parry": 0,
+                    "kb_force_parry": 6.0
+                }
+            ]
+        }
+    ],
+    "movements": [
+        {
+            "name": "m combo",
+            "phases": [
+                {
+                    "direction": "to_player",
+                    "curve": "fade_out",
+                    "force_x": 4.0,
+                    "force_y": 10.0,
+                    "delay": 0,
+                    "duration": 10
+                }
+            ],
+            "stop_dist": 0
+        },
+        {
+            "name": "m chase",
+            "phases": [
+                {
+                    "direction": "to_player",
+                    "curve": "constant",
+                    "force_x": 8.0,
+                    "force_y": 0.0,
+                    "delay": 0,
+                    "duration": 27
+                }
+            ],
+            "stop_dist": 60
+        },
+        {
+            "name": "m chase slow",
+            "stop_dist": 60,
+            "phases": [
+                {
+                    "direction": "to_player",
+                    "curve": "constant",
+                    "force_x": 0.5,
+                    "force_y": 0.0,
+                    "delay": 0,
+                    "duration": 15
+                }
+            ]
+        },
+        {
+            "name": "m tele",
+            "stop_dist": 0,
+            "phases": [
+                {
+                    "direction": "teleport",
+                    "curve": "fade_out",
+                    "force_x": 8.0,
+                    "force_y": -180.0,
+                    "delay": 0,
+                    "duration": 15
+                }
+            ]
+        }
+    ],
+    "sequences": [
+        {
+            "name": "combo",
+            "chance": 0.5,
+            "cooldown": 120,
+            "trigger_zone": {
+                "shape": {
+                    "template": "forms.rect",
+                    "w": 95,
+                    "h": 50
+                },
+                "offset_x": 10,
+                "offset_y": 0,
+                "type": "following",
+                "hold_time": 0,
+                "consecutive_limit": 3,
+                "accumulate_hold": true
+            },
+            "steps": [
+                {
+                    "type": "attack",
+                    "idx": 0,
+                    "trigger": "time",
+                    "delay": 0
+                },
+                {
+                    "type": "movement",
+                    "idx": 0,
+                    "delay": 45
+                },
+                {
+                    "type": "attack",
+                    "idx": 1,
+                    "trigger": "time",
+                    "delay": 25
+                }
+            ]
+        },
+        {
+            "name": "atk big",
+            "chance": 0.5,
+            "cooldown": 120,
+            "trigger_zone": {
+                "shape": {
+                    "template": "forms.rect",
+                    "w": 155,
+                    "h": 50
+                },
+                "offset_x": 15,
+                "offset_y": 0,
+                "type": "following",
+                "hold_time": 0,
+                "consecutive_limit": 3,
+                "accumulate_hold": true
+            },
+            "steps": [
+                {
+                    "type": "attack",
+                    "idx": 2,
+                    "trigger": "time",
+                    "delay": 0
+                }
+            ]
+        },
+        {
+            "name": "chase",
+            "chance": 0.9999999999999999,
+            "cooldown": 20,
+            "trigger_zone": {
+                "shape": {
+                    "template": "forms.rect",
+                    "w": 165,
+                    "h": 50
+                },
+                "offset_x": 230,
+                "offset_y": 0,
+                "type": "following",
+                "hold_time": 0,
+                "consecutive_limit": 3,
+                "accumulate_hold": true
+            },
+            "steps": [
+                {
+                    "type": "movement",
+                    "idx": 1,
+                    "delay": 0
+                }
+            ]
+        },
+        {
+            "name": "atk chase",
+            "chance": 0.9999999999999999,
+            "cooldown": 120,
+            "trigger_zone": {
+                "shape": {
+                    "template": "forms.rect",
+                    "w": 220,
+                    "h": 50
+                },
+                "offset_x": 175,
+                "offset_y": 0,
+                "type": "following",
+                "hold_time": 0,
+                "consecutive_limit": 3,
+                "accumulate_hold": true
+            },
+            "steps": [
+                {
+                    "type": "attack",
+                    "idx": 3,
+                    "trigger": "time",
+                    "delay": 0
+                }
+            ]
+        },
+        {
+            "name": "Seq 5",
+            "chance": 0.9999999999999999,
+            "cooldown": 120,
+            "trigger_zone": {
+                "shape": {
+                    "template": "forms.rect",
+                    "w": 90,
+                    "h": 50
+                },
+                "offset_x": -230,
+                "offset_y": 0,
+                "type": "following",
+                "hold_time": 0,
+                "consecutive_limit": 3,
+                "accumulate_hold": true
+            },
+            "steps": [
+                {
+                    "type": "movement",
+                    "idx": 3,
+                    "delay": 5
+                },
+                {
+                    "type": "movement",
+                    "idx": 1,
+                    "delay": 0
+                },
+                {
+                    "type": "attack",
+                    "idx": 2,
+                    "trigger": "time",
+                    "delay": 10
+                }
+            ]
+        }
+    ],
+    "flows": [
+        {
+            "name": "chase + atk",
+            "chance": 1.0,
+            "cooldown": 20,
+            "trigger_zone": {
+                "shape": {
+                    "template": "forms.rect",
+                    "w": 220,
+                    "h": 50
+                },
+                "offset_x": 175,
+                "offset_y": 0,
+                "type": "following",
+                "hold_time": 0,
+                "consecutive_limit": 3,
+                "accumulate_hold": true
+            },
+            "steps": [
+                {
+                    "seq_idx": 2,
+                    "delay": 0,
+                    "is_random": false,
+                    "seq_pool": [
+                        2
+                    ]
+                },
+                {
+                    "seq_idx": 3,
+                    "delay": 10,
+                    "is_random": false,
+                    "seq_pool": [
+                        3
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "Combo Flow 2",
+            "chance": 0.5,
+            "cooldown": 40,
+            "trigger_zone": {
+                "shape": {
+                    "template": "forms.rect",
+                    "w": 150,
+                    "h": 50
+                },
+                "offset_x": 20,
+                "offset_y": 0,
+                "type": "following",
+                "hold_time": 0,
+                "consecutive_limit": 3,
+                "accumulate_hold": true
+            },
+            "steps": [
+                {
+                    "seq_idx": 0,
+                    "delay": 0,
+                    "is_random": true,
+                    "seq_pool": [
+                        0,
+                        1
+                    ]
+                },
+                {
+                    "seq_idx": 2,
+                    "delay": 30,
+                    "is_random": false,
+                    "seq_pool": [
+                        0
+                    ]
+                }
+            ]
+        }
+    ],
+    "projectiles": []
+}

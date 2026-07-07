@@ -1,0 +1,107 @@
+{
+    "hp": 5,
+    "body": {
+        "template": "forms.rect",
+        "w": 40,
+        "h": 60
+    },
+    "movement_config": {
+        "type_move": "walking",
+        "speed": 1.2,
+        "range_x": 120,
+        "stop_dist": 20,
+        "patrol_on_platform": false
+    },
+    "detection": {
+        "template": "detections.front_view",
+        "shape": {
+            "template": "forms.rect",
+            "type": "rectangle",
+            "w": 200,
+            "h": 70
+        },
+        "offset_x": -120,
+        "offset_y": -45
+    },
+    "attacks": [
+        {
+            "name": "Atk Template 1",
+            "cooldown": 25,
+            "windup": 25,
+            "shapes": [
+                {
+                    "shape": {
+                        "template": "forms.rect",
+                        "w": 140,
+                        "h": 40
+                    },
+                    "offset_x": 35,
+                    "offset_y": 0,
+                    "angle": -15,
+                    "delay": 0,
+                    "duration": 10,
+                    "damage": 1,
+                    "kb_angle": 0,
+                    "kb_force": 12.0,
+                    "sprite_dir": "forward",
+                    "kb_angle_hit": -15,
+                    "kb_force_hit": 12.0,
+                    "kb_angle_parry": -15,
+                    "kb_force_parry": 6.0
+                }
+            ]
+        }
+    ],
+    "movements": [
+        {
+            "name": "Move Pres 1",
+            "stop_dist": 0,
+            "phases": [
+                {
+                    "direction": "teleport",
+                    "curve": "fade_out",
+                    "force_x": 18.0,
+                    "force_y": -190.0,
+                    "delay": 0,
+                    "duration": 15
+                }
+            ]
+        }
+    ],
+    "sequences": [
+        {
+            "name": "Seq 1",
+            "chance": 0.5,
+            "cooldown": 120,
+            "trigger_zone": {
+                "shape": {
+                    "template": "forms.rect",
+                    "w": 90,
+                    "h": 50
+                },
+                "offset_x": -15,
+                "offset_y": 0,
+                "type": "following",
+                "hold_time": 0,
+                "consecutive_limit": 3,
+                "accumulate_hold": true
+            },
+            "steps": [
+                {
+                    "type": "movement",
+                    "idx": 0,
+                    "delay": 5
+                },
+                {
+                    "type": "attack",
+                    "idx": 0,
+                    "trigger": "time",
+                    "delay": 0
+                }
+            ]
+        }
+    ],
+    "flows": [],
+    "name": "enemy 2",
+    "projectiles": []
+}

@@ -1,0 +1,210 @@
+{
+    "player": {
+        "start_x": 150,
+        "start_y": 400,
+        "speed": 5,
+        "jump_force": 14,
+        "gravity": 0.6,
+        "attack_range": 65,
+        "attack_cooldown": 45
+    },
+    "platforms": [
+        {
+            "x": 0,
+            "y": 520,
+            "w": 1000,
+            "h": 80,
+            "color": [
+                60,
+                40,
+                40
+            ]
+        },
+        {
+            "x": 150,
+            "y": 380,
+            "w": 150,
+            "h": 15,
+            "color": [
+                120,
+                80,
+                80
+            ]
+        },
+        {
+            "x": 700,
+            "y": 380,
+            "w": 150,
+            "h": 15,
+            "color": [
+                120,
+                80,
+                80
+            ]
+        }
+    ],
+    "enemies": [
+        {
+            "hp": 25,
+            "body": {
+                "template": "forms.rect",
+                "w": 65,
+                "h": 90
+            },
+            "movement": {
+                "type": "patrol",
+                "speed": 0.8,
+                "range_x": 60,
+                "type_move": "walking"
+            },
+            "detection": {
+                "template": "detections.front_view",
+                "shape": {
+                    "template": "forms.rect",
+                    "w": 350,
+                    "h": 100
+                },
+                "offset_x": 0,
+                "offset_y": -15
+            },
+            "attack_zones": [
+                {
+                    "name": "Cleave Arena",
+                    "shape": {
+                        "template": "forms.rect",
+                        "w": 130,
+                        "h": 90
+                    },
+                    "offset_x": 10,
+                    "offset_y": 0,
+                    "type": "following",
+                    "attacks": [
+                        {
+                            "name": "Stomp & Cleave",
+                            "chance": 0.9999999999999999,
+                            "cooldown": 90,
+                            "windup": 45,
+                            "shapes": [
+                                {
+                                    "shape": {
+                                        "template": "forms.rect",
+                                        "w": 80,
+                                        "h": 60
+                                    },
+                                    "offset_x": 5,
+                                    "offset_y": 10,
+                                    "angle": 0,
+                                    "delay": 0,
+                                    "duration": 15,
+                                    "damage": 1,
+                                    "kb_angle": 0,
+                                    "kb_force": 12.0,
+                                    "sprite_dir": "forward"
+                                },
+                                {
+                                    "shape": {
+                                        "template": "forms.rect",
+                                        "w": 140,
+                                        "h": 80
+                                    },
+                                    "offset_x": 25,
+                                    "offset_y": -10,
+                                    "angle": 15,
+                                    "delay": 31,
+                                    "duration": 20,
+                                    "damage": 3
+                                }
+                            ],
+                            "attack_zone": {
+                                "template": "detections.front_view",
+                                "shape": {
+                                    "template": "forms.rect",
+                                    "w": 80,
+                                    "h": 50
+                                },
+                                "offset_x": 10,
+                                "offset_y": 0,
+                                "type": "following"
+                            },
+                            "post_action_type": "none",
+                            "post_action_force_x": 8.0,
+                            "post_action_force_y": 10.0
+                        }
+                    ]
+                },
+                {
+                    "name": "Gaze Range",
+                    "shape": {
+                        "template": "forms.rect",
+                        "w": 300,
+                        "h": 60
+                    },
+                    "offset_x": 20,
+                    "offset_y": -20,
+                    "type": "following",
+                    "attacks": [
+                        {
+                            "name": "Stone Gaze",
+                            "chance": 0.4,
+                            "cooldown": 120,
+                            "windup": 50,
+                            "shapes": [
+                                {
+                                    "shape": {
+                                        "template": "forms.rect",
+                                        "w": 300,
+                                        "h": 40
+                                    },
+                                    "offset_x": 20,
+                                    "offset_y": -20,
+                                    "angle": 0,
+                                    "delay": 0,
+                                    "duration": 12,
+                                    "damage": 2
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ],
+            "sequences": [
+                {
+                    "name": "Combo 1",
+                    "chance": 0.9999999999999999,
+                    "cooldown": 120,
+                    "steps": [
+                        {
+                            "type": "projectile",
+                            "zone_idx": 0,
+                            "attack_idx": 0,
+                            "trigger": "time",
+                            "move_type": "dash_forward",
+                            "force_x": 8.0,
+                            "force_y": 0.0,
+                            "duration": 15,
+                            "proj_speed": 10.0,
+                            "proj_angle": 0.0,
+                            "proj_gravity": 0.0
+                        },
+                        {
+                            "type": "movement",
+                            "zone_idx": 0,
+                            "attack_idx": 0,
+                            "trigger": "time",
+                            "move_type": "dash_backward",
+                            "force_x": 8.0,
+                            "force_y": 0.0,
+                            "duration": 15,
+                            "proj_speed": 10.0,
+                            "proj_angle": 0.0,
+                            "proj_gravity": 0.0
+                        }
+                    ]
+                }
+            ],
+            "name": "Gorgon Boss",
+            "x": 460.0,
+            "y": 420.0
+        }
+    ]
+}
