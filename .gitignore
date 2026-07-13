@@ -1,0 +1,45 @@
+# Системные кэши Python
+**/__pycache__/
+*.py[cod]
+*$py.class
+
+# Окружение и виртуальные среды (даже если их пока нет в структуре)
+.venv/
+venv/
+env/
+ENV/
+bin/
+lib/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Сборка проекта (PyInstaller)
+build/
+dist/
+# Если вы хотите хранить файл настройки сборки в репозитории, оставьте строку ниже закомментированной.
+# Если spec-файл генерируется каждый раз заново и не нужен в Git, раскомментируйте её:
+# *.spec
+
+# Настройки сред разработки (IDE)
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# Системные файлы операционных систем
+.DS_Store
+Thumbs.db

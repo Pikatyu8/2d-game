@@ -1,0 +1,37 @@
+{
+    "forms": {
+        "rect": {
+            "type": "rectangle",
+            "w": "$w",
+            "h": "$h"
+        },
+        "circle": {
+            "type": "circle",
+            "r": "$r"
+        }
+    },
+    "detections": {
+        "front_view": {
+            "shape": "$shape",
+            "offset_x": "$offset_x",
+            "offset_y": "$offset_y",
+            "type": "following"
+        },
+        "radius_view": {
+            "shape": "$shape",
+            "offset_x": "$offset_x",
+            "offset_y": "$offset_y",
+            "type": "stationary"
+        }
+    },
+    "attacks": {
+        "melee_swipe": {
+            "shape": "$shape",
+            "offset_x": "$offset_x",
+            "offset_y": "$offset_y",
+            "cooldown": "$cooldown",
+            "damage": "$damage",
+            "type": "following"
+        }
+    }
+}

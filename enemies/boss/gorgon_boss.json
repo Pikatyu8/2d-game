@@ -1,0 +1,169 @@
+{
+    "hp": 25,
+    "body": {
+        "template": "forms.rect",
+        "w": 65,
+        "h": 90
+    },
+    "movement_config": {
+        "type_move": "walking",
+        "speed": 0.8,
+        "range_x": 60
+    },
+    "detection": {
+        "template": "detections.front_view",
+        "shape": {
+            "template": "forms.rect",
+            "w": 350,
+            "h": 100
+        },
+        "offset_x": 0,
+        "offset_y": -15
+    },
+    "attacks": [
+        {
+            "name": "Stomp & Cleave",
+            "cooldown": 90,
+            "windup": 45,
+            "shapes": [
+                {
+                    "shape": {
+                        "template": "forms.rect",
+                        "w": 80,
+                        "h": 60
+                    },
+                    "offset_x": 78,
+                    "offset_y": -5,
+                    "angle": 0,
+                    "delay": 0,
+                    "duration": 15,
+                    "damage": 1,
+                    "kb_angle": 0,
+                    "kb_force": 12.0,
+                    "kb_angle_hit": 0,
+                    "kb_force_hit": 12.0,
+                    "kb_angle_parry": 0,
+                    "kb_force_parry": 6.0
+                },
+                {
+                    "shape": {
+                        "template": "forms.rect",
+                        "w": 140,
+                        "h": 80
+                    },
+                    "offset_x": 128,
+                    "offset_y": -15,
+                    "angle": 15,
+                    "delay": 25,
+                    "duration": 20,
+                    "damage": 3,
+                    "kb_angle": 0,
+                    "kb_force": 12.0,
+                    "kb_angle_hit": 0,
+                    "kb_force_hit": 12.0,
+                    "kb_angle_parry": 0,
+                    "kb_force_parry": 6.0
+                }
+            ]
+        },
+        {
+            "name": "Stone Gaze",
+            "cooldown": 120,
+            "windup": 50,
+            "shapes": [
+                {
+                    "shape": {
+                        "template": "forms.rect",
+                        "w": 300,
+                        "h": 40
+                    },
+                    "offset_x": 203,
+                    "offset_y": -45,
+                    "angle": 0,
+                    "delay": 0,
+                    "duration": 12,
+                    "damage": 2,
+                    "kb_angle": 0,
+                    "kb_force": 12.0,
+                    "kb_angle_hit": 0,
+                    "kb_force_hit": 12.0,
+                    "kb_angle_parry": 0,
+                    "kb_force_parry": 6.0
+                }
+            ]
+        }
+    ],
+    "movements": [
+        {
+            "name": "Boss Leap",
+            "phases": [
+                {
+                    "direction": "to_player",
+                    "curve": "fade_out",
+                    "force_x": 5.0,
+                    "force_y": 12.0,
+                    "delay": 0,
+                    "duration": 30
+                }
+            ]
+        }
+    ],
+    "sequences": [
+        {
+            "name": "Boss Cleave Combo",
+            "chance": 0.6,
+            "cooldown": 90,
+            "trigger_zone": {
+                "shape": {
+                    "template": "forms.rect",
+                    "w": 130,
+                    "h": 90
+                },
+                "offset_x": 10,
+                "offset_y": 0,
+                "type": "following",
+                "hold_time": 0,
+                "consecutive_limit": 3,
+                "accumulate_hold": true
+            },
+            "steps": [
+                {
+                    "type": "attack",
+                    "idx": 0,
+                    "delay": 0,
+                    "trigger": "time"
+                }
+            ],
+            "post_cooldown": 30
+        },
+        {
+            "name": "Gaze Attack",
+            "chance": 0.4,
+            "cooldown": 120,
+            "trigger_zone": {
+                "shape": {
+                    "template": "forms.rect",
+                    "w": 300,
+                    "h": 60
+                },
+                "offset_x": 20,
+                "offset_y": -20,
+                "type": "following",
+                "hold_time": 0,
+                "consecutive_limit": 3,
+                "accumulate_hold": true
+            },
+            "steps": [
+                {
+                    "type": "attack",
+                    "idx": 1,
+                    "delay": 0,
+                    "trigger": "time"
+                }
+            ],
+            "post_cooldown": 30
+        }
+    ],
+    "flows": [],
+    "projectiles": []
+}
