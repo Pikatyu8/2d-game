@@ -1,3 +1,4 @@
+# START OF FILE enemy.py
 
 # entities/enemy.py
 import pygame
@@ -73,3 +74,7 @@ class Enemy(EnemyCollisionMixin, EnemySequenceMixin, EnemyAILogicMixin, EnemyRen
         self.attack_sprite_circle = None
 
         self.patrol_return_delay_timer = 0
+        
+        # Обход препятствий летающими врагами
+        self.was_collided_x = False
+        self.was_collided_y = False

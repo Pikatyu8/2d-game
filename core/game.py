@@ -11,6 +11,18 @@ from core.game_parts.game_editor_logic import GameEditorLogicMixin
 from entities.platform_class import Platform
 from editor.editor_ui import EditorUI, PlayerStart
 
+def rotate_point(point, center, angle_degrees):
+    px, py = point
+    cx, cy = center
+    rad = math.radians(angle_degrees)
+    cos_a = math.cos(rad)
+    sin_a = math.sin(rad)
+    dx = px - cx
+    dy = py - cy
+    rx = dx * cos_a - dy * sin_a + cx
+    ry = dx * sin_a + dy * cos_a + cy
+    return rx, ry
+
 class Game(GameIOMixin, GameEditorLogicMixin):
     def __init__(self):
         pygame.init()
@@ -115,9 +127,9 @@ class Game(GameIOMixin, GameEditorLogicMixin):
             return None
             
         target_enemy_raw = enemy.raw_data
-        zoom = self.zoom if self.editor_mode == "LEVEL_EDITOR" else 1.0
-        camera_x = self.camera_x if self.editor_mode == "LEVEL_EDITOR" else 0
-        camera_y = self.camera_y if self.editor_mode == "LEVEL_EDITOR" else 0
+        zoom = self.zoom if self.editor_mode in ("LEVEL_EDITOR", "ENEMY_EDITOR") else 1.0
+        camera_x = self.camera_x if self.editor_mode in ("LEVEL_EDITOR", "ENEMY_EDITOR") else 0
+        camera_y = self.camera_y if self.editor_mode in ("LEVEL_EDITOR", "ENEMY_EDITOR") else 0
         
         shape_dict = None
         parent_dict = None
@@ -200,6 +212,9 @@ class Game(GameIOMixin, GameEditorLogicMixin):
         parent_dict = info["parent_dict"]
         enemy = info["enemy"]
         val = info["shape_data_val"]
+        camera_x = self.camera_x if self.editor_mode in ("LEVEL_EDITOR", "ENEMY_EDITOR") else 0
+        camera_y = self.camera_y if self.editor_mode in ("LEVEL_EDITOR", "ENEMY_EDITOR") else 0
+        zoom = info["zoom"]
         
         mx, my = mouse_pos
         
@@ -225,7 +240,9 @@ class Game(GameIOMixin, GameEditorLogicMixin):
                     "det_type": parent_dict.get("type", "following"),
                     "is_attack": (self.inspector_tab == "DETAILED_ATTACK"),
                     "abs_x": cx - r,
-                    "abs_y": cy - r
+                    "abs_y": cy - r,
+                    "scx": scx,
+                    "scy": scy
                 }
                 if dist >= 0.8 * sr:
                     self.hitbox_drag_mode = "resize_circle"
@@ -234,9 +251,20 @@ class Game(GameIOMixin, GameEditorLogicMixin):
                 return True
         else: # rectangle
             rect, angle = val
-            if screen_rect.collidepoint(mx, my):
+            cx = CANVAS_OFFSET_X + (rect.centerx - camera_x) * zoom
+            cy = (rect.centery - camera_y) * zoom
+            sw = rect.width * zoom
+            sh = rect.height * zoom
+            
+            # Строим виртуальный локальный неповернутый прямоугольник
+            local_rect = pygame.Rect(cx - sw/2, cy - sh/2, sw, sh)
+            # Трансформируем позицию курсора мыши в локальные неповернутые координаты хитбокса
+            local_mx, local_my = rotate_point((mx, my), (cx, cy), -angle)
+            
+            if local_rect.collidepoint(local_mx, local_my):
                 self.dragging_hitbox = True
                 self.hitbox_drag_start_mouse = (mx, my)
+                
                 self.hitbox_drag_start_val = {
                     "offset_x": parent_dict.get("offset_x", 0),
                     "offset_y": parent_dict.get("offset_y", 0),
@@ -250,13 +278,21 @@ class Game(GameIOMixin, GameEditorLogicMixin):
                     "det_type": parent_dict.get("type", "following"),
                     "is_attack": (self.inspector_tab == "DETAILED_ATTACK"),
                     "abs_x": rect.x,
-                    "abs_y": rect.y
+                    "abs_y": rect.y,
+                    "angle": parent_dict.get("angle", shape_dict.get("angle", 0)),
+                    "scx": cx,
+                    "scy": cy
                 }
                 
-                rx = (mx - screen_rect.left) / screen_rect.width
-                ry = (my - screen_rect.top) / screen_rect.height
+                rx = (local_mx - local_rect.left) / local_rect.width
+                ry = (local_my - local_rect.top) / local_rect.height
                 
-                if rx <= 0.2:
+                # Проверяем угловые пересечения 20%-х границ для вращения
+                is_corner = (rx <= 0.2 or rx >= 0.8) and (ry <= 0.2 or ry >= 0.8)
+                
+                if is_corner:
+                    self.hitbox_drag_mode = "rotate"
+                elif rx <= 0.2:
                     self.hitbox_drag_mode = "resize_left"
                 elif rx >= 0.8:
                     self.hitbox_drag_mode = "resize_right"
@@ -304,7 +340,6 @@ class Game(GameIOMixin, GameEditorLogicMixin):
         new_abs_y = start_abs_y
         
         if stype == "circle":
-            # Считываем радиус безопасно внутри блока для кругов
             start_r = start_vals["r"]
             new_r = start_r
             
@@ -324,7 +359,6 @@ class Game(GameIOMixin, GameEditorLogicMixin):
             shape_dict["r"] = int(new_r)
             
         else: # rectangle
-            # Считываем размеры безопасно внутри блока для прямоугольников
             start_w = start_vals["w"]
             start_h = start_vals["h"]
             new_w = start_w
@@ -345,6 +379,19 @@ class Game(GameIOMixin, GameEditorLogicMixin):
                 new_h = max(5, start_h - dy_world)
                 actual_dh = new_h - start_h
                 new_abs_y = start_abs_y - actual_dh
+            elif self.hitbox_drag_mode == "rotate":
+                scx = start_vals["scx"]
+                scy = start_vals["scy"]
+                start_mouse_angle = math.atan2(start_my - scy, start_mx - scx)
+                current_mouse_angle = math.atan2(my - scy, mx - scx)
+                angle_diff_rad = current_mouse_angle - start_mouse_angle
+                angle_diff_deg = math.degrees(angle_diff_rad)
+                start_box_angle = start_vals["angle"]
+                # Вычитание дельты углов позволяет вращать хитбокс следом за курсором
+                new_angle = start_box_angle - angle_diff_deg
+                new_angle = (new_angle + 180) % 360 - 180
+                
+                parent_dict["angle"] = int(new_angle)
                 
             shape_dict["w"] = int(new_w)
             shape_dict["h"] = int(new_h)
@@ -354,37 +401,38 @@ class Game(GameIOMixin, GameEditorLogicMixin):
         enemy_rect_y = start_vals["enemy_rect_y"]
         enemy_rect_w = start_vals["enemy_rect_w"]
         enemy_rect_h = start_vals["enemy_rect_h"]
-        enemy_rect_centerx = enemy_rect_x + enemy_rect_w / 2
-        enemy_rect_centery = enemy_rect_y + enemy_rect_h / 2
         enemy_direction = start_vals["enemy_direction"]
         det_type = start_vals["det_type"]
         is_attack = start_vals["is_attack"]
         
+        # Рассчитываем координаты центра фигуры
         if stype == "circle":
             new_cx = new_abs_x + new_r
             new_cy = new_abs_y + new_r
-            
-            if is_attack:
-                new_ox = (new_cx - enemy_rect_centerx) * enemy_direction
-                new_oy = new_cy - enemy_rect_centery
-            else:
-                if det_type == "following" and enemy_direction == -1:
-                    new_ox = enemy_rect_centerx - new_cx
+        
+        # Без центрирования: рассчитываем сдвиг напрямую от краев/Top-Left положения врага
+        if is_attack or det_type == "following":
+            if enemy_direction == -1:
+                if stype == "circle":
+                    new_ox = enemy_rect_x - new_cx - new_r
                 else:
-                    new_ox = new_cx - enemy_rect_centerx
-                new_oy = new_cy - enemy_rect_centery
-        else: # rectangle
-            if is_attack:
-                new_ox = (new_abs_x + new_w / 2 - enemy_rect_centerx) * enemy_direction
-                new_oy = new_abs_y + new_h / 2 - enemy_rect_centery
-            else:
-                if det_type == "following" and enemy_direction == -1:
                     new_ox = enemy_rect_x - new_abs_x - new_w
-                elif det_type == "following" and enemy_direction == 1:
-                    new_ox = new_abs_x - (enemy_rect_x + enemy_rect_w)
+            else:
+                if stype == "circle":
+                    new_ox = new_cx - (enemy_rect_x + enemy_rect_w) - new_r
                 else:
-                    new_ox = new_abs_x - enemy_rect_centerx + new_w / 2
-                new_oy = new_abs_y - enemy_rect_y
+                    new_ox = new_abs_x - (enemy_rect_x + enemy_rect_w)
+        else: # Stationary
+            if stype == "circle":
+                new_ox = new_cx - enemy_rect_x - new_r
+            else:
+                new_ox = new_abs_x - enemy_rect_x
+                
+        # По вертикали - сдвиг всегда измеряется прямо от верхней грани врага
+        if stype == "circle":
+            new_oy = new_cy - enemy_rect_y - new_r
+        else:
+            new_oy = new_abs_y - enemy_rect_y
                 
         parent_dict["offset_x"] = int(new_ox)
         parent_dict["offset_y"] = int(new_oy)
@@ -487,7 +535,7 @@ class Game(GameIOMixin, GameEditorLogicMixin):
                             self.left_panel_scroll = max(0, self.left_panel_scroll - 30)
                         elif 1200 <= mouse_pos[0] <= 1400:
                             self.right_panel_scroll = max(0, self.right_panel_scroll - 30)
-                        elif self.editor_mode == "LEVEL_EDITOR" and CANVAS_OFFSET_X <= mouse_pos[0] <= CANVAS_OFFSET_X + CANVAS_WIDTH:
+                        elif self.editor_mode in ("LEVEL_EDITOR", "ENEMY_EDITOR") and CANVAS_OFFSET_X <= mouse_pos[0] <= CANVAS_OFFSET_X + CANVAS_WIDTH:
                             self.zoom = min(3.0, self.zoom + 0.1)
                     elif event.button == 5:
                         if 0 <= mouse_pos[0] < CANVAS_OFFSET_X:
@@ -496,7 +544,7 @@ class Game(GameIOMixin, GameEditorLogicMixin):
                         elif 1200 <= mouse_pos[0] <= 1400:
                             max_scroll_r = getattr(self, "right_panel_max_scroll", 400)
                             self.right_panel_scroll = min(max_scroll_r, self.right_panel_scroll + 30)
-                        elif self.editor_mode == "LEVEL_EDITOR" and CANVAS_OFFSET_X <= mouse_pos[0] <= CANVAS_OFFSET_X + CANVAS_WIDTH:
+                        elif self.editor_mode in ("LEVEL_EDITOR", "ENEMY_EDITOR") and CANVAS_OFFSET_X <= mouse_pos[0] <= CANVAS_OFFSET_X + CANVAS_WIDTH:
                             self.zoom = max(0.3, self.zoom - 0.1)
                 elif event.type == pygame.MOUSEBUTTONUP:
                     if event.button == 1:
@@ -509,11 +557,15 @@ class Game(GameIOMixin, GameEditorLogicMixin):
                             self.editor_mode = "LEVEL_EDITOR"
                         elif self.editor_mode == "LEVEL_EDITOR":
                             self.editor_mode = "ENEMY_EDITOR"
+                            self.camera_x = 200  # Выравниваем камеру по центру тестовой сцены
+                            self.camera_y = 0
                             self.zoom = 1.0  
                             self.selected_attack_edit_idx = 0
                             self.selected_box_idx = 0
                         else:
                             self.editor_mode = "GAMEPLAY"
+                            self.camera_x = 0
+                            self.camera_y = 0
                             self.zoom = 1.0
                             if self.player:
                                 self.player.respawn(self)
@@ -584,16 +636,16 @@ class Game(GameIOMixin, GameEditorLogicMixin):
                     editing_box_idx = self.selected_box_idx
             
             if self.editor_mode == "ENEMY_EDITOR":
-                self.dummy_platform.draw(self.screen, CANVAS_OFFSET_X)
+                self.dummy_platform.draw(self.screen, self.camera_x, self.camera_y, self.zoom)
                 if self.dummy_enemy:
                     p_fake = pygame.Rect(-100, -100, 0, 0)
                     self.dummy_enemy.draw(
                         surface=self.screen,
                         show_debug=True,
                         player_rect=p_fake,
-                        camera_x=0,
-                        camera_y=0,
-                        zoom=1.0,
+                        camera_x=self.camera_x,
+                        camera_y=self.camera_y,
+                        zoom=self.zoom,
                         editing_trigger_idx=editing_trig_idx,
                         editing_attack_idx=editing_atk_idx,
                         editing_box_idx=editing_box_idx,
@@ -671,25 +723,70 @@ class Game(GameIOMixin, GameEditorLogicMixin):
             if active_hitbox_info:
                 screen_rect = active_hitbox_info["screen_rect"]
                 stype = active_hitbox_info["type"]
+                val = active_hitbox_info["shape_data_val"]
+                zoom = active_hitbox_info["zoom"]
+                camera_x = self.camera_x if self.editor_mode in ("LEVEL_EDITOR", "ENEMY_EDITOR") else 0
+                camera_y = self.camera_y if self.editor_mode in ("LEVEL_EDITOR", "ENEMY_EDITOR") else 0
                 
-                # Заливка области слабой прозрачностью
-                overlay_surf = pygame.Surface((screen_rect.width, screen_rect.height), pygame.SRCALPHA)
-                overlay_surf.fill((0, 240, 255, 30))
-                self.screen.blit(overlay_surf, (screen_rect.x, screen_rect.y))
+                # Создаем временную поверхность с поддержкой прозрачности для отрисовки повернутых элементов
+                rot_surf = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
                 
                 if stype == "rectangle":
-                    w20 = int(screen_rect.width * 0.2)
-                    h20 = int(screen_rect.height * 0.2)
+                    rect, angle = val
+                    cx = CANVAS_OFFSET_X + (rect.centerx - camera_x) * zoom
+                    cy = (rect.centery - camera_y) * zoom
+                    sw = rect.width * zoom
+                    sh = rect.height * zoom
                     
-                    # Левая граница
-                    pygame.draw.line(self.screen, (0, 240, 255, 128), (screen_rect.left + w20, screen_rect.top), (screen_rect.left + w20, screen_rect.bottom), 1)
-                    # Правая граница
-                    pygame.draw.line(self.screen, (0, 240, 255, 128), (screen_rect.right - w20, screen_rect.top), (screen_rect.right - w20, screen_rect.bottom), 1)
-                    # Верхняя граница
-                    pygame.draw.line(self.screen, (0, 240, 255, 128), (screen_rect.left, screen_rect.top + h20), (screen_rect.right, screen_rect.top + h20), 1)
-                    # Нижняя граница
-                    pygame.draw.line(self.screen, (0, 240, 255, 128), (screen_rect.left, screen_rect.bottom - h20), (screen_rect.right, screen_rect.bottom - h20), 1)
-                else:
+                    rad = math.radians(-angle)
+                    cos_a, sin_a = math.cos(rad), math.sin(rad)
+                    
+                    w20 = sw * 0.2
+                    h20 = sh * 0.2
+                    
+                    local_x = [-sw/2, -sw/2 + w20, sw/2 - w20, sw/2]
+                    local_y = [-sh/2, -sh/2 + h20, sh/2 - h20, sh/2]
+                    
+                    grid_points = [[None for _ in range(4)] for _ in range(4)]
+                    for i in range(4):
+                        for j in range(4):
+                            px = local_x[i]
+                            py = local_y[j]
+                            rx = px * cos_a - py * sin_a + cx
+                            ry = px * sin_a + py * cos_a + cy
+                            grid_points[i][j] = (int(rx), int(ry))
+                            
+                    # 1. Заливаем основную область прямоугольника слабой прозрачностью
+                    outer_corners = [grid_points[0][0], grid_points[3][0], grid_points[3][3], grid_points[0][3]]
+                    pygame.draw.polygon(rot_surf, (0, 240, 255, 30), outer_corners)
+                    
+                    # 2. Подсвечиваем 4 угловые 20% зоны для вращения
+                    corner_tl = [grid_points[0][0], grid_points[1][0], grid_points[1][1], grid_points[0][1]]
+                    corner_tr = [grid_points[2][0], grid_points[3][0], grid_points[3][1], grid_points[2][1]]
+                    corner_bl = [grid_points[0][2], grid_points[1][2], grid_points[1][3], grid_points[0][3]]
+                    corner_br = [grid_points[2][2], grid_points[3][2], grid_points[3][3], grid_points[2][3]]
+                    
+                    pygame.draw.polygon(rot_surf, (0, 240, 255, 75), corner_tl)
+                    pygame.draw.polygon(rot_surf, (0, 240, 255, 75), corner_tr)
+                    pygame.draw.polygon(rot_surf, (0, 240, 255, 75), corner_bl)
+                    pygame.draw.polygon(rot_surf, (0, 240, 255, 75), corner_br)
+                    
+                    # 3. Рисуем бирюзовые линии внутренней сетки (20% разделение)
+                    pygame.draw.line(rot_surf, (0, 240, 255, 128), grid_points[1][0], grid_points[1][3], 1)
+                    pygame.draw.line(rot_surf, (0, 240, 255, 128), grid_points[2][0], grid_points[2][3], 1)
+                    pygame.draw.line(rot_surf, (0, 240, 255, 128), grid_points[0][1], grid_points[3][1], 1)
+                    pygame.draw.line(rot_surf, (0, 240, 255, 128), grid_points[0][2], grid_points[3][2], 1)
+                    
+                    # 4. Рисуем внешнюю бирюзовую рамку
+                    pygame.draw.polygon(rot_surf, (0, 240, 255), outer_corners, 2)
+                    
+                    self.screen.blit(rot_surf, (0, 0))
+                    
+                else: # circle
+                    # Рисуем заливку
+                    pygame.draw.circle(rot_surf, (0, 240, 255, 30), (int(screen_rect.centerx), int(screen_rect.centery)), int(screen_rect.width / 2))
+                    self.screen.blit(rot_surf, (0, 0))
+                    
                     scx = screen_rect.centerx
                     scy = screen_rect.centery
                     sr = screen_rect.width / 2
@@ -706,13 +803,13 @@ class Game(GameIOMixin, GameEditorLogicMixin):
                         p2 = (int(scx + sr * cos_a), int(scy + sr * sin_a))
                         pygame.draw.line(self.screen, (0, 240, 255, 200), p1, p2, 2)
                         pygame.draw.circle(self.screen, (0, 240, 255), p2, 4)
-                    
-                pygame.draw.rect(self.screen, (0, 240, 255), screen_rect, 2)
+                        
+                    pygame.draw.circle(self.screen, (0, 240, 255), (int(scx), int(scy)), int(sr), 2)
 
             self.ui.draw_left_panel(mouse_clicked_this_frame)
             self.ui.draw_right_panel(mouse_clicked_this_frame, target_enemy_raw)
 
-            if self.editor_mode == "LEVEL_EDITOR" and CANVAS_OFFSET_X <= mouse_pos[0] <= CANVAS_OFFSET_X + CANVAS_WIDTH:
+            if self.editor_mode in ("LEVEL_EDITOR", "ENEMY_EDITOR") and CANVAS_OFFSET_X <= mouse_pos[0] <= CANVAS_OFFSET_X + CANVAS_WIDTH:
                 self.handle_editor_input(mouse_pos, mouse_clicked_this_frame, right_clicked_this_frame)
 
             font = self.get_cached_font(24)

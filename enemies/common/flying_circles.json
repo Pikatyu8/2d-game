@@ -15,8 +15,8 @@
             "template": "forms.circle",
             "r": 225
         },
-        "offset_x": 0,
-        "offset_y": 0
+        "offset_x": -210,
+        "offset_y": -211
     },
     "sequences": [
         {
@@ -29,8 +29,8 @@
                     "type": "circle",
                     "r": 85
                 },
-                "offset_x": 0,
-                "offset_y": 0,
+                "offset_x": -101,
+                "offset_y": -70,
                 "type": "following",
                 "hold_time": 0,
                 "consecutive_limit": 3,
@@ -94,8 +94,8 @@
                         "type": "circle",
                         "r": 130
                     },
-                    "offset_x": 0,
-                    "offset_y": 0,
+                    "offset_x": -146,
+                    "offset_y": -115,
                     "angle": 0,
                     "delay": 0,
                     "duration": 10,
@@ -114,8 +114,8 @@
                         "type": "circle",
                         "r": 125
                     },
-                    "offset_x": 0,
-                    "offset_y": 0,
+                    "offset_x": -141,
+                    "offset_y": -110,
                     "angle": 0,
                     "delay": 30,
                     "duration": 10,

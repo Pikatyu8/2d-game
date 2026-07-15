@@ -171,8 +171,12 @@ class EnemyRenderMixin:
                         v_oy = vis_box.get("offset_y", 0)
                         if v_type == "circle":
                             v_r = vis_box.get("r", 25)
-                            v_cx = self.rect.centerx + (v_ox * self.direction)
-                            v_cy = self.rect.centery + v_oy
+                            if self.direction == -1:
+                                v_cx = self.rect.left - v_ox - v_r
+                            else:
+                                v_cx = self.rect.right + v_ox + v_r
+                            v_cy = self.rect.y + v_oy + v_r
+                            
                             asx = CANVAS_OFFSET_X + (v_cx - v_r - camera_x) * zoom
                             asy = (v_cy - v_r - camera_y) * zoom
                             asw = v_r * 2 * zoom
@@ -183,10 +187,12 @@ class EnemyRenderMixin:
                         else:
                             v_w = vis_box.get("w", 50)
                             v_h = vis_box.get("h", 40)
-                            v_rect_cx = self.rect.centerx + (v_ox * self.direction)
-                            v_rect_cy = self.rect.centery + v_oy
-                            v_abs_x = v_rect_cx - v_w / 2
-                            v_abs_y = v_rect_cy - v_h / 2
+                            if self.direction == -1:
+                                v_abs_x = self.rect.left - v_ox - v_w
+                            else:
+                                v_abs_x = self.rect.right + v_ox
+                            v_abs_y = self.rect.y + v_oy
+                            
                             asx = CANVAS_OFFSET_X + (v_abs_x - camera_x) * zoom
                             asy = (v_abs_y - camera_y) * zoom
                             asw = v_w * zoom
@@ -201,10 +207,12 @@ class EnemyRenderMixin:
                         oy = s_data.get("offset_y", 0)
                         if stype == "rectangle":
                             w, h = shape.get("w", 50), shape.get("h", 40)
-                            rect_cx = self.rect.centerx + (ox * self.direction)
-                            rect_cy = self.rect.centery + oy
-                            v_abs_x = rect_cx - w / 2
-                            v_abs_y = rect_cy - h / 2
+                            if self.direction == -1:
+                                v_abs_x = self.rect.left - ox - w
+                            else:
+                                v_abs_x = self.rect.right + ox
+                            v_abs_y = self.rect.y + oy
+                            
                             asx = CANVAS_OFFSET_X + (v_abs_x - camera_x) * zoom
                             asy = (v_abs_y - camera_y) * zoom
                             asw = w * zoom
@@ -214,8 +222,12 @@ class EnemyRenderMixin:
                             angle_origin_cy = v_abs_y + h / 2
                         else:
                             r = shape.get("r", 25)
-                            v_cx = self.rect.centerx + (ox * self.direction)
-                            v_cy = self.rect.centery + oy
+                            if self.direction == -1:
+                                v_cx = self.rect.left - ox - r
+                            else:
+                                v_cx = self.rect.right + ox + r
+                            v_cy = self.rect.y + oy + r
+                            
                             asx = CANVAS_OFFSET_X + (v_cx - r - camera_x) * zoom
                             asy = (v_cy - r - camera_y) * zoom
                             asw = r * 2 * zoom
@@ -396,8 +408,7 @@ class EnemyRenderMixin:
                     (step.get("is_random", False) and z_idx in step.get("seq_pool", [])) or 
                     (not step.get("is_random", False) and z_idx == step.get("seq_idx", 0))
                     for flow in self.flows 
-                    for step in flow.get("steps", [])
-                )
+                    for step in flow.get("steps", []))
                 if is_in_flow:
                     continue
                 

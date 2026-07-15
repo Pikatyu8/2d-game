@@ -1,3 +1,5 @@
+# START OF FILE enemy_ai.py
+
 # entities/enemy_parts/enemy_ai.py
 import pygame
 import math
@@ -273,6 +275,20 @@ class EnemyAILogicMixin(AICombatMixin, AIFlowMixin, AIActionProcessorMixin):
                         if distance > stop_dist:
                             vx = (dx / distance) * (self.speed * 1.4)
                             self.vy = (dy / distance) * (self.speed * 1.4)
+                            
+                            # Применение перпендикулярной силы для обхода препятствий
+                            if getattr(self, "was_collided_x", False):
+                                # Столкнулись по горизонтали (стена) -> вертикальное движение к игроку
+                                dir_y = -1 if dy < 0 else 1 if dy > 0 else -1
+                                self.vy = dir_y * (self.speed * 1.4)
+                                # Легкий горизонтальный прижим для обтекания препятствий
+                                vx = vx * 0.2
+                            elif getattr(self, "was_collided_y", False):
+                                # Столкнулись по вертикали (пол/потолок) -> горизонтальное движение к игроку
+                                dir_x = -1 if dx < 0 else 1 if dx > 0 else 1
+                                vx = dir_x * (self.speed * 1.4)
+                                # Легкий вертикальный прижим
+                                self.vy = self.vy * 0.2
                         else:
                             vx = 0
                             self.vy = 0
@@ -364,7 +380,12 @@ class EnemyAILogicMixin(AICombatMixin, AIFlowMixin, AIActionProcessorMixin):
         self.x_remainder = total_vx - int_vx
 
         # Вертикальная скорость передается напрямую, как в оригинальной физике
+        intended_vy = self.vy
         on_ground, self.vy, collided_x = apply_movement_and_collisions(self.rect, int_vx, self.vy, platforms)
+        
+        # Сохраняем флаги коллизий на текущем кадре
+        self.was_collided_x = collided_x
+        self.was_collided_y = (intended_vy != 0 and self.vy == 0)
         
         if self.state == "patrol" and collided_x:
             self.direction *= -1

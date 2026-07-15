@@ -17,10 +17,24 @@ class GameEditorLogicMixin:
         if getattr(self, "is_panning", False) and pygame.mouse.get_pressed()[0]:
             dx = (mouse_pos[0] - self.pan_start_mouse_x) / self.pan_zoom_backup
             dy = (mouse_pos[1] - self.pan_start_mouse_y) / self.pan_zoom_backup
-            self.camera_x = max(0, self.pan_start_cam_x - dx)
+            if self.editor_mode == "ENEMY_EDITOR":
+                # В редакторе врагов разрешаем свободное перемещение камеры в отрицательные координаты
+                self.camera_x = self.pan_start_cam_x - dx
+            else:
+                self.camera_x = max(0, self.pan_start_cam_x - dx)
             self.camera_y = self.pan_start_cam_y - dy
         else:
             self.is_panning = False
+
+        if self.editor_mode == "ENEMY_EDITOR":
+            if mouse_clicked:
+                self.is_panning = True
+                self.pan_start_mouse_x = mouse_pos[0]
+                self.pan_start_mouse_y = mouse_pos[1]
+                self.pan_start_cam_x = self.camera_x
+                self.pan_start_cam_y = self.camera_y
+                self.pan_zoom_backup = current_zoom
+            return
 
         if self.dragging_instance:
             new_x = cx - self.drag_offset_x

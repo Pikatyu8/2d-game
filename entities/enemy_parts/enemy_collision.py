@@ -22,7 +22,7 @@ class EnemyCollisionMixin:
                 abs_x = self.rect.right + ox
                 effective_angle = angle
             else:
-                abs_x = self.rect.centerx + ox - w // 2
+                abs_x = self.rect.x + ox
                 effective_angle = angle
             abs_y = self.rect.y + oy
             return ("rectangle", (pygame.Rect(abs_x, abs_y, w, h), effective_angle))
@@ -30,10 +30,12 @@ class EnemyCollisionMixin:
         elif shape["type"] == "circle":
             r = shape["r"]
             if det_type == "following" and self.direction == -1:
-                cx = self.rect.centerx - ox
+                cx = self.rect.left - ox - r
+            elif det_type == "following":
+                cx = self.rect.right + ox + r
             else:
-                cx = self.rect.centerx + ox
-            cy = self.rect.centery + oy
+                cx = self.rect.x + ox + r
+            cy = self.rect.y + oy + r
             return ("circle", (cx, cy, r))
         return None
 
@@ -41,7 +43,6 @@ class EnemyCollisionMixin:
         if self.rect.colliderect(player_rect):
             return True
             
-        # Единая оптимизированная проверка одиночных триггерных зон, не занятых в ИИ-потоках (Flows)
         for idx in range(len(self.trigger_zones)):
             is_in_flow = False
             for flow in self.flows:
@@ -57,7 +58,6 @@ class EnemyCollisionMixin:
             if self.check_player_in_zone(player_rect, idx):
                 return True
 
-        # Проверяем триггеры Flows для обнаружения игрока
         for f_idx in range(len(self.flows)):
             if self.check_player_in_flow_zone(player_rect, f_idx):
                 return True
@@ -114,7 +114,7 @@ class EnemyCollisionMixin:
                 abs_x = self.rect.right + ox
                 effective_angle = angle
             else:
-                abs_x = self.rect.centerx + ox - w // 2
+                abs_x = self.rect.x + ox
                 effective_angle = angle
             abs_y = self.rect.y + oy
             return ("rectangle", (pygame.Rect(abs_x, abs_y, w, h), effective_angle))
@@ -122,10 +122,12 @@ class EnemyCollisionMixin:
         elif shape["type"] == "circle":
             r = shape["r"]
             if det_type == "following" and self.direction == -1:
-                cx = self.rect.centerx - ox
+                cx = self.rect.left - ox - r
+            elif det_type == "following":
+                cx = self.rect.right + ox + r
             else:
-                cx = self.rect.centerx + ox
-            cy = self.rect.centery + oy
+                cx = self.rect.x + ox + r
+            cy = self.rect.y + oy + r
             return ("circle", (cx, cy, r))
         return None
 
@@ -208,17 +210,22 @@ class EnemyCollisionMixin:
             
             if stype == "circle":
                 r = shape.get("r", 25)
-                cx = self.rect.centerx + (ox * self.direction)
-                cy = self.rect.centery + oy
+                if self.direction == -1:
+                    cx = self.rect.left - ox - r
+                else:
+                    cx = self.rect.right + ox + r
+                cy = self.rect.y + oy + r
                 shapes_data.append(("circle", (cx, cy, r)))
             else:
                 w = shape.get("w", 50)
                 h = shape.get("h", 40)
-                rect_cx = self.rect.centerx + (ox * self.direction)
-                rect_cy = self.rect.centery + oy
-                abs_x = rect_cx - w / 2
-                abs_y = rect_cy - h / 2
-                effective_angle = -angle if self.direction == -1 else angle
+                if self.direction == -1:
+                    abs_x = self.rect.left - ox - w
+                    effective_angle = -angle
+                else:
+                    abs_x = self.rect.right + ox
+                    effective_angle = angle
+                abs_y = self.rect.y + oy
                 shapes_data.append(("rectangle", (pygame.Rect(abs_x, abs_y, w, h), effective_angle)))
         return shapes_data
 
@@ -231,8 +238,11 @@ class EnemyCollisionMixin:
         
         if stype == "circle":
             r = shape.get("r", 25)
-            cx = self.rect.centerx + (ox * self.direction)
-            cy = self.rect.centery + oy
+            if self.direction == -1:
+                cx = self.rect.left - ox - r
+            else:
+                cx = self.rect.right + ox + r
+            cy = self.rect.y + oy + r
             
             closest_x = max(player.rect.left, min(cx, player.rect.right))
             closest_y = max(player.rect.top, min(cy, player.rect.bottom))
@@ -241,13 +251,15 @@ class EnemyCollisionMixin:
         else:
             w = shape.get("w", 50)
             h = shape.get("h", 40)
-            rect_cx = self.rect.centerx + (ox * self.direction)
-            rect_cy = self.rect.centery + oy
-            abs_x = rect_cx - w / 2
-            abs_y = rect_cy - h / 2
+            if self.direction == -1:
+                abs_x = self.rect.left - ox - w
+                effective_angle = -angle
+            else:
+                abs_x = self.rect.right + ox
+                effective_angle = angle
+            abs_y = self.rect.y + oy
             rect = pygame.Rect(abs_x, abs_y, w, h)
             
-            effective_angle = -angle if self.direction == -1 else angle
             if effective_angle == 0:
                 return rect.colliderect(player.rect)
             else:
@@ -290,7 +302,7 @@ class EnemyCollisionMixin:
                 abs_x = self.rect.right + ox
                 effective_angle = angle
             else:
-                abs_x = self.rect.centerx + ox - w // 2
+                abs_x = self.rect.x + ox
                 effective_angle = angle
             abs_y = self.rect.y + oy
             return ("rectangle", (pygame.Rect(abs_x, abs_y, w, h), effective_angle))
@@ -298,10 +310,12 @@ class EnemyCollisionMixin:
         elif shape["type"] == "circle":
             r = shape["r"]
             if det_type == "following" and self.direction == -1:
-                cx = self.rect.centerx - ox
+                cx = self.rect.left - ox - r
+            elif det_type == "following":
+                cx = self.rect.right + ox + r
             else:
-                cx = self.rect.centerx + ox
-            cy = self.rect.centery + oy
+                cx = self.rect.x + ox + r
+            cy = self.rect.y + oy + r
             return ("circle", (cx, cy, r))
         return None
 
