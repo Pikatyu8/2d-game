@@ -57,7 +57,6 @@ class RightPanelKFramesTabMixin:
             pcd_minus, pcd_plus = self.draw_property_row("Post CD", curr_seq.setdefault("post_cooldown", 30), y_offset)
             y_offset += 35
             
-            # --- СЕКЦИЯ НАСТРОЙКИ АНАЛОГИЧНОЙ ПАЛИТРЫ (СТАРТ И ЭНД) ---
             lbl_color_sec = self.font_ui.render("TELEGRAPH TINT PALETTE", True, (255, 180, 100))
             game.screen.blit(lbl_color_sec, (1215, y_offset))
             y_offset += 20
@@ -73,7 +72,6 @@ class RightPanelKFramesTabMixin:
                     game.rebuild_objects()
             y_offset += 26
 
-            # Вычисление автоматического смещения по HSV (левый и правый аналог)
             base_rgb = curr_color if curr_color else [110, 110, 125]
             left_c, _, right_c = get_analogous_colors(base_rgb)
 
@@ -82,18 +80,15 @@ class RightPanelKFramesTabMixin:
             left_rect = pygame.Rect(1215, y_offset, box_w, box_h)
             right_rect = pygame.Rect(1215 + box_w + 20, y_offset, box_w, box_h)
 
-            # Левый аналогичный цвет (Start)
             pygame.draw.rect(game.screen, left_c, left_rect)
             pygame.draw.rect(game.screen, (255, 255, 255), left_rect, 1)
             font_lbl = game.get_cached_font(11)
             start_txt = font_lbl.render("START", True, (255, 255, 255) if sum(left_c)/3 < 128 else (0, 0, 0))
             game.screen.blit(start_txt, (left_rect.centerx - start_txt.get_width()//2, left_rect.centery - start_txt.get_height()//2))
 
-            # Символ перехода
             arr_txt = font_lbl.render(">", True, (150, 150, 150))
             game.screen.blit(arr_txt, (1215 + box_w + 10 - arr_txt.get_width()//2, y_offset + box_h//2 - arr_txt.get_height()//2))
 
-            # Правый аналогичный цвет (End)
             pygame.draw.rect(game.screen, right_c, right_rect)
             pygame.draw.rect(game.screen, (255, 255, 255), right_rect, 1)
             end_txt = font_lbl.render("END", True, (255, 255, 255) if sum(right_c)/3 < 128 else (0, 0, 0))
@@ -274,59 +269,39 @@ class RightPanelKFramesTabMixin:
                             curr_step.update({"type": "projectile", "idx": 0, "delay": curr_delay})
                         game.rebuild_objects()
                         
+                # Использование выпадающего списка (dropdown) для выбора атак
                 if curr_step["type"] == "attack":
                     attacks = target_enemy_raw.get("attacks", [])
                     atk_idx = curr_step.setdefault("idx", 0)
                     atk_idx = max(0, min(atk_idx, len(attacks) - 1)) if attacks else 0
                     curr_step["idx"] = atk_idx
                     
-                    atk_name = attacks[atk_idx].get("name", f"Atk #{atk_idx+1}") if attacks else "None"
-                    
-                    atk_minus, atk_plus = self.draw_property_row("Template Atk", atk_name, y_offset)
+                    atk_options = [a.get("name", f"Atk #{i+1}") for i, a in enumerate(attacks)] if attacks else ["None"]
+                    self.draw_dropdown("Template Atk", atk_options, atk_idx, y_offset, "step_attack_template", mouse_clicked_this_frame, mouse_pos)
                     y_offset += 30
-                    
-                    if mouse_clicked_this_frame:
-                        if atk_minus.collidepoint(mouse_pos):
-                            curr_step["idx"] = (atk_idx - 1) % len(attacks) if attacks else 0
-                        if atk_plus.collidepoint(mouse_pos):
-                            curr_step["idx"] = (atk_idx + 1) % len(attacks) if attacks else 0
-                        game.rebuild_objects()
                         
+                # Использование выпадающего списка (dropdown) для выбора движений
                 elif curr_step["type"] == "movement":
                     movements = target_enemy_raw.get("movements", [])
                     move_idx = curr_step.setdefault("idx", 0)
                     move_idx = max(0, min(move_idx, len(movements) - 1)) if movements else 0
                     curr_step["idx"] = move_idx
                     
-                    move_name = movements[move_idx].get("name", f"Move #{move_idx+1}") if movements else "None"
-                    
-                    m_minus, m_plus = self.draw_property_row("Template Move", move_name, y_offset)
+                    move_options = [m.get("name", f"Move #{i+1}") for i, m in enumerate(movements)] if movements else ["None"]
+                    self.draw_dropdown("Template Move", move_options, move_idx, y_offset, "step_movement_template", mouse_clicked_this_frame, mouse_pos)
                     y_offset += 30
-                    
-                    if mouse_clicked_this_frame:
-                        if m_minus.collidepoint(mouse_pos):
-                            curr_step["idx"] = (move_idx - 1) % len(movements) if movements else 0
-                        if m_plus.collidepoint(mouse_pos):
-                            curr_step["idx"] = (move_idx + 1) % len(movements) if movements else 0
-                        game.rebuild_objects()
                         
+                # Использование выпадающего списка (dropdown) для выбора снарядов
                 elif curr_step["type"] == "projectile":
                     proj_list = target_enemy_raw.get("projectiles", [])
                     if proj_list:
                         proj_idx = curr_step.setdefault("idx", 0)
                         proj_idx = max(0, min(proj_idx, len(proj_list) - 1))
                         curr_step["idx"] = proj_idx
-                        proj_name = proj_list[proj_idx].get("name", f"Proj #{proj_idx+1}")
                         
-                        pr_minus, pr_plus = self.draw_property_row("Template Proj", proj_name, y_offset)
+                        proj_options = [p.get("name", f"Proj #{i+1}") for i, p in enumerate(proj_list)]
+                        self.draw_dropdown("Template Proj", proj_options, proj_idx, y_offset, "step_projectile_template", mouse_clicked_this_frame, mouse_pos)
                         y_offset += 30
-                        
-                        if mouse_clicked_this_frame:
-                            if pr_minus.collidepoint(mouse_pos):
-                                curr_step["idx"] = (proj_idx - 1) % len(proj_list)
-                            if pr_plus.collidepoint(mouse_pos):
-                                curr_step["idx"] = (proj_idx + 1) % len(proj_list)
-                            game.rebuild_objects()
                     else:
                         ps_minus, ps_plus = self.draw_property_row("Proj Speed", round(curr_step.setdefault("proj_speed", 10.0), 1), y_offset)
                         y_offset += 25

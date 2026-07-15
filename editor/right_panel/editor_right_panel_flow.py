@@ -107,7 +107,6 @@ class RightPanelFlowTabMixin:
         pcd_minus, pcd_plus = self.draw_property_row("Post CD", curr_flow.setdefault("post_cooldown", 30), y_offset)
         y_offset += 35
         
-        # --- СЕКЦИЯ НАСТРОЙКИ АНАЛОГИЧНОЙ ПАЛИТРЫ ПОТОКА ИИ ---
         lbl_color_sec = self.font_ui.render("TELEGRAPH TINT PALETTE", True, (255, 180, 100))
         game.screen.blit(lbl_color_sec, (1215, y_offset))
         y_offset += 20
@@ -123,7 +122,6 @@ class RightPanelFlowTabMixin:
                 game.rebuild_objects()
         y_offset += 26
 
-        # Вычисление автоматического смещения по HSV (левый и правый аналог)
         base_rgb = curr_color if curr_color else [110, 110, 125]
         left_c, _, right_c = get_analogous_colors(base_rgb)
 
@@ -132,18 +130,15 @@ class RightPanelFlowTabMixin:
         left_rect = pygame.Rect(1215, y_offset, box_w, box_h)
         right_rect = pygame.Rect(1215 + box_w + 20, y_offset, box_w, box_h)
 
-        # Левый аналогичный цвет (Start)
         pygame.draw.rect(game.screen, left_c, left_rect)
         pygame.draw.rect(game.screen, (255, 255, 255), left_rect, 1)
         font_lbl = game.get_cached_font(11)
         start_txt = font_lbl.render("START", True, (255, 255, 255) if sum(left_c)/3 < 128 else (0, 0, 0))
         game.screen.blit(start_txt, (left_rect.centerx - start_txt.get_width()//2, left_rect.centery - start_txt.get_height()//2))
 
-        # Направление перехода
         arr_txt = font_lbl.render(">", True, (150, 150, 150))
         game.screen.blit(arr_txt, (1215 + box_w + 10 - arr_txt.get_width()//2, y_offset + box_h//2 - arr_txt.get_height()//2))
 
-        # Правый аналогичный цвет (End)
         pygame.draw.rect(game.screen, right_c, right_rect)
         pygame.draw.rect(game.screen, (255, 255, 255), right_rect, 1)
         end_txt = font_lbl.render("END", True, (255, 255, 255) if sum(right_c)/3 < 128 else (0, 0, 0))
@@ -205,7 +200,7 @@ class RightPanelFlowTabMixin:
         trig_ox_minus, trig_ox_plus = self.draw_property_row("Trig OffX", curr_trig.get("offset_x", 0), y_offset)
         y_offset += 25
         trig_oy_minus, trig_oy_plus = self.draw_property_row("Trig OffY", curr_trig.get("offset_y", 0), y_offset)
-        y_offset += 25
+        y_offset += 35
 
         flow_hold = curr_trig.setdefault("hold_time", 0)
         hold_minus, hold_plus = self.draw_property_row("Trig Hold", flow_hold, y_offset)
@@ -299,22 +294,15 @@ class RightPanelFlowTabMixin:
 
             sequences = target_enemy_raw.get("sequences", [])
 
+            # Использование выпадающего списка (dropdown) для выбора Sequence
             if not is_random:
                 seq_idx = curr_step.setdefault("seq_idx", 0)
                 seq_idx = max(0, min(seq_idx, len(sequences) - 1)) if sequences else 0
                 curr_step["seq_idx"] = seq_idx
                 
-                seq_name = sequences[seq_idx].get("name", f"Seq #{seq_idx+1}") if sequences else "None"
-                seq_minus, seq_plus = self.draw_property_row("Sequence", seq_name, y_offset)
-                y_offset += 25
-                
-                if mouse_clicked_this_frame:
-                    if seq_minus.collidepoint(mouse_pos):
-                        curr_step["seq_idx"] = (seq_idx - 1) % len(sequences) if sequences else 0
-                        game.rebuild_objects()
-                    if seq_plus.collidepoint(mouse_pos):
-                        curr_step["seq_idx"] = (seq_idx + 1) % len(sequences) if sequences else 0
-                        game.rebuild_objects()
+                seq_options = [s.get("name", f"Seq #{i+1}") for i, s in enumerate(sequences)] if sequences else ["None"]
+                self.draw_dropdown("Sequence", seq_options, seq_idx, y_offset, "flow_step_sequence", mouse_clicked_this_frame, mouse_pos)
+                y_offset += 30
             else:
                 lbl_pool = self.font_ui.render("RANDOM POOL SELECTION:", True, (255, 180, 100))
                 game.screen.blit(lbl_pool, (1215, y_offset))

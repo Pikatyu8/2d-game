@@ -58,19 +58,14 @@ class EnemyRenderMixin:
         head_center_x = draw_rect.centerx
         head_center_y = draw_rect.y + head_h // 2
 
-        # Вспомогательная функция для интерполяции цвета предупреждения
         def get_telegraph_color(base_color, progress):
             if base_color is None:
-                # Стандартный переход (от желтого к красному)
                 return (255, int(220 * (1.0 - progress)), 0)
-            # Избегаем смещения тона (примеси желтого): интерполируем строго внутри 
-            # заданного в конфиге цвета (от 40% до 100% его яркости)
             r = int((base_color[0] * 0.4) + progress * (base_color[0] * 0.6))
             g = int((base_color[1] * 0.4) + progress * (base_color[1] * 0.6))
             b = int((base_color[2] * 0.4) + progress * (base_color[2] * 0.6))
             return (max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b)))
 
-        # Синхронизация переменных состояния для отрисовки
         active_attacks = [act for act in getattr(self, "running_actions", []) if act["type"] == "attack"]
         if active_attacks:
             first_atk = active_attacks[0]
@@ -123,14 +118,10 @@ class EnemyRenderMixin:
             parry_lbl = font_parry.render(f"+{self.parry_accumulated_damage} PARRY DMG", True, (0, 255, 255))
             surface.blit(parry_lbl, (draw_rect.x, draw_rect.y - 34 * zoom))
 
-        # Отрисовка сужающегося предупреждения
         if self.is_winding_up:
             windup_max = getattr(self, "attack_windup_max", 35)
             progress = max(0.0, min(1.0, (windup_max - self.attack_windup_timer) / windup_max))
-            
-            # Цвета берутся строго из настроек действия
             warn_color = get_telegraph_color(self.active_execution_color, progress)
-            
             outer_r = int((22 * (1.0 - progress) + 8) * zoom)
             pygame.draw.circle(surface, warn_color, (int(head_center_x), int(head_center_y)), outer_r, max(1, int(2 * zoom)))
             
@@ -157,10 +148,7 @@ class EnemyRenderMixin:
                         
             if upcoming_shape is not None:
                 progress = (15 - min_time_to_trigger) / 15.0
-                
-                # Использование точного цвета без посторонних спектров
                 warn_color = get_telegraph_color(self.active_execution_color, progress)
-                
                 outer_r = int((22 * (1.0 - progress) + 8) * zoom)
                 pygame.draw.circle(surface, warn_color, (int(head_center_x), int(head_center_y)), outer_r, max(1, int(2 * zoom)))
                 
@@ -171,7 +159,6 @@ class EnemyRenderMixin:
                     lbl_x = head_center_x - warn_lbl.get_width() // 2
                     surface.blit(warn_lbl, (lbl_x, draw_rect.y - 18 * zoom))
 
-            # Отрисовка хитбоксов и спрайтов атаки
             for s_idx, s_data in enumerate(shapes):
                 delay = s_data.get("delay", 0)
                 duration = s_data.get("duration", 10)
@@ -186,7 +173,6 @@ class EnemyRenderMixin:
                             v_r = vis_box.get("r", 25)
                             v_cx = self.rect.centerx + (v_ox * self.direction)
                             v_cy = self.rect.centery + v_oy
-                            
                             asx = CANVAS_OFFSET_X + (v_cx - v_r - camera_x) * zoom
                             asy = (v_cy - v_r - camera_y) * zoom
                             asw = v_r * 2 * zoom
@@ -201,7 +187,6 @@ class EnemyRenderMixin:
                             v_rect_cy = self.rect.centery + v_oy
                             v_abs_x = v_rect_cx - v_w / 2
                             v_abs_y = v_rect_cy - v_h / 2
-                            
                             asx = CANVAS_OFFSET_X + (v_abs_x - camera_x) * zoom
                             asy = (v_abs_y - camera_y) * zoom
                             asw = v_w * zoom
@@ -220,7 +205,6 @@ class EnemyRenderMixin:
                             rect_cy = self.rect.centery + oy
                             v_abs_x = rect_cx - w / 2
                             v_abs_y = rect_cy - h / 2
-                            
                             asx = CANVAS_OFFSET_X + (v_abs_x - camera_x) * zoom
                             asy = (v_abs_y - camera_y) * zoom
                             asw = w * zoom
@@ -232,7 +216,6 @@ class EnemyRenderMixin:
                             r = shape.get("r", 25)
                             v_cx = self.rect.centerx + (ox * self.direction)
                             v_cy = self.rect.centery + oy
-                            
                             asx = CANVAS_OFFSET_X + (v_cx - r - camera_x) * zoom
                             asy = (v_cy - r - camera_y) * zoom
                             asw = r * 2 * zoom
@@ -285,7 +268,6 @@ class EnemyRenderMixin:
                         else:
                             pygame.draw.circle(surface, (255, 120, 120), (int(asx + asw/2), int(asy + ash/2)), int(asw/2))
 
-        # Отрисовка линии и точки телепортации
         for act in getattr(self, "running_actions", []):
             if act.get("type") == "movement":
                 for p in act.get("phases", []):
@@ -294,10 +276,8 @@ class EnemyRenderMixin:
                         if act.get("timeline_timer", 0) <= delay:
                             dx = p.get("force_x", 0.0)
                             dy = p.get("force_y", 0.0)
-                            
                             start_cx = self.rect.centerx
                             start_cy = self.rect.centery
-                            
                             is_real_player = (player_rect is not None and player_rect.width > 0 and player_rect.x >= 0)
                             if is_real_player:
                                 dir_to_player = 1 if player_rect.centerx >= start_cx else -1
@@ -306,7 +286,6 @@ class EnemyRenderMixin:
                                 
                             target_cx = start_cx + int(dx * dir_to_player)
                             target_cy = start_cy + int(dy)
-                            
                             sx1 = CANVAS_OFFSET_X + (start_cx - camera_x) * zoom
                             sy1 = (start_cy - camera_y) * zoom
                             sx2 = CANVAS_OFFSET_X + (target_cx - camera_x) * zoom
@@ -323,10 +302,8 @@ class EnemyRenderMixin:
                 if p.get("direction") == "teleport":
                     dx = p.get("force_x", 0.0)
                     dy = p.get("force_y", 0.0)
-                    
                     start_cx = self.rect.centerx
                     start_cy = self.rect.centery
-                    
                     is_real_player = (player_rect is not None and player_rect.width > 0 and player_rect.x >= 0)
                     if is_real_player:
                         dir_to_player = 1 if player_rect.centerx >= start_cx else -1
@@ -335,7 +312,6 @@ class EnemyRenderMixin:
                         
                     target_cx = start_cx + int(dx * dir_to_player)
                     target_cy = start_cy + int(dy)
-                    
                     sx1 = CANVAS_OFFSET_X + (start_cx - camera_x) * zoom
                     sy1 = (start_cy - camera_y) * zoom
                     sx2 = CANVAS_OFFSET_X + (target_cx - camera_x) * zoom
@@ -374,7 +350,6 @@ class EnemyRenderMixin:
                 yellow_fill = pygame.Surface((sz_w, sz_h), pygame.SRCALPHA)
                 yellow_fill.fill((255, 255, 0, 35))
                 surface.blit(yellow_fill, (sz_x, sz_y))
-                
                 pygame.draw.rect(surface, (255, 255, 0), (sz_x, sz_y, sz_w, sz_h), 2)
                 
                 font_size = max(8, int(11 * zoom))
@@ -389,7 +364,6 @@ class EnemyRenderMixin:
                 color = (255, 100, 100) if is_alert else (255, 255, 100)
                 if stype == "rectangle":
                     rect, angle = val
-                    
                     asx = CANVAS_OFFSET_X + (rect.x - camera_x) * zoom
                     asy = (rect.y - camera_y) * zoom
                     asw = rect.width * zoom
@@ -416,6 +390,7 @@ class EnemyRenderMixin:
                     sr = r * zoom
                     pygame.draw.circle(surface, color, (int(scx), int(scy)), int(sr), 1)
 
+            # Рендеринг оранжевых триггерных зон последовательностей ключевых кадров
             for z_idx, zone in enumerate(self.trigger_zones):
                 is_in_flow = any(
                     (step.get("is_random", False) and z_idx in step.get("seq_pool", [])) or 
@@ -444,8 +419,11 @@ class EnemyRenderMixin:
                         progress = min(1.0, current_hold / req_hold)
                         base_color = (int(255 * (1.0 - progress)), int(60 + 180 * progress), int(255 * progress))
                     
-                    if editing_trigger_idx is not None and z_idx != editing_trigger_idx:
-                        draw_color = (*base_color, 128)
+                    # Активной зоной считается только та, что редактируется на вкладке K-FRAMES
+                    is_active_trigger_edit = (inspector_tab == "K-FRAMES" and editing_trigger_idx == z_idx)
+                    
+                    if not is_active_trigger_edit:
+                        draw_color = (*base_color, 64)  # Накладываем полупрозрачность в неактивном режиме
                         target_draw_surface = local_surf
                     else:
                         draw_color = base_color
@@ -487,6 +465,7 @@ class EnemyRenderMixin:
                     hold_lbl = font_hold.render(f"Hold: {current_hold}/{req_hold} (Atk: {consec}/{limit})", True, base_color)
                     surface.blit(hold_lbl, (draw_x + 5 * zoom, draw_y + 5 * zoom))
 
+            # Рендеринг голубых триггерных зон потоков поведения (Flows)
             for f_idx, flow in enumerate(self.flows):
                 flow_zone_data = self.get_attack_zone_shape_for_flow_zone(f_idx)
                 if flow_zone_data:
@@ -494,8 +473,11 @@ class EnemyRenderMixin:
                     is_alert = self.check_player_in_flow_zone(player_rect, f_idx)
                     base_color = (0, 240, 255) if is_alert else (0, 150, 200)
                     
-                    if editing_trigger_idx is not None:
-                        draw_color = (*base_color, 128)
+                    # Поток активен, только если он детально редактируется во вкладке FLOW
+                    is_active_flow_edit = (inspector_tab == "DETAILED_FLOW" and game is not None and game.selected_flow_idx == f_idx)
+                    
+                    if not is_active_flow_edit:
+                        draw_color = (*base_color, 64)  # Накладываем полупрозрачность в неактивном режиме
                         target_draw_surface = local_surf
                     else:
                         draw_color = base_color
@@ -544,6 +526,7 @@ class EnemyRenderMixin:
                     flow_lbl = font_flow.render(f"Flow: {flow.get('name', 'Combo')} [{current_hold}/{req_hold} (Atk: {consec}/{limit})]", True, base_color)
                     surface.blit(flow_lbl, (draw_x + 5 * zoom, draw_y + 5 * zoom))
 
+            # Рендеринг хитбоксов урона атак
             for a_idx, att in enumerate(self.attacks):
                 shapes_data = self.get_attack_shapes_by_index(a_idx)
                 is_active_edit = (self.is_swinging and self.active_attack_idx == a_idx) or (editing_attack_idx is not None and a_idx == editing_attack_idx)
@@ -619,7 +602,6 @@ class EnemyRenderMixin:
                                 v_r = vis_box.get("r", 25)
                                 v_cx = self.rect.centerx + (v_ox * self.direction)
                                 v_cy = self.rect.centery + v_oy
-                                
                                 scx = CANVAS_OFFSET_X + (v_cx - camera_x) * zoom
                                 scy = (v_cy - camera_y) * zoom
                                 sr = v_r * zoom
@@ -631,7 +613,6 @@ class EnemyRenderMixin:
                                 v_rect_cy = self.rect.centery + v_oy
                                 v_abs_x = v_rect_cx - v_w / 2
                                 v_abs_y = v_rect_cy - v_h / 2
-                                
                                 asx = CANVAS_OFFSET_X + (v_abs_x - camera_x) * zoom
                                 asy = (v_abs_y - camera_y) * zoom
                                 asw = v_w * zoom
