@@ -253,7 +253,7 @@ class RightPanelAttacksTabMixin:
             game.rebuild_objects()
         y_offset += 30
         
-        if has_vis_box:
+        if has_vis_box in curr_box:
             v_box = curr_box["visual_box"]
             v_type = v_box.setdefault("type", "rectangle")
             
