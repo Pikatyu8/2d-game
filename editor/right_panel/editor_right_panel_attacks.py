@@ -153,9 +153,10 @@ class RightPanelAttacksTabMixin:
                 game.rebuild_objects()
         y_offset += 30
             
-        lbl_title = self.font_ui.render(f"EDIT TEMPLATE #{game.selected_attack_edit_idx + 1}", True, (255, 180, 100))
-        game.screen.blit(lbl_title, (1215, y_offset))
-        y_offset += 20
+        # Интегрированный выпадающий список выбора атаки
+        atk_options = [a.get("name", f"Atk #{i+1}") for i, a in enumerate(attacks)]
+        self.draw_dropdown("Select Attack", atk_options, game.selected_attack_edit_idx, y_offset, "attack_select_active_attack", mouse_clicked_this_frame, mouse_pos)
+        y_offset += 30
         
         cd_minus, cd_plus = self.draw_property_row("Cooldown", curr_att.get("cooldown", 45), y_offset)
         y_offset += 25
@@ -169,8 +170,10 @@ class RightPanelAttacksTabMixin:
         box_count_minus, box_count_plus = self.draw_property_row("Hitboxes", len(shapes), y_offset)
         y_offset += 25
 
-        box_select_minus, box_select_plus = self.draw_property_row("Select Box", f"{game.selected_box_idx + 1}/{len(shapes)}", y_offset)
-        y_offset += 25
+        # Интегрированный выпадающий список выбора хитбокса
+        box_options = [f"Hitbox #{i+1}" for i in range(len(shapes))]
+        self.draw_dropdown("Select Box", box_options, game.selected_box_idx, y_offset, "attack_select_box", mouse_clicked_this_frame, mouse_pos)
+        y_offset += 30
 
         box_shape_type = curr_box_shape.get("type")
         if not box_shape_type:
@@ -318,11 +321,6 @@ class RightPanelAttacksTabMixin:
                 shapes.append(copy.deepcopy(shapes[-1]))
                 game.selected_box_idx = len(shapes) - 1
 
-            if box_select_minus.collidepoint(mouse_pos):
-                game.selected_box_idx = max(0, game.selected_box_idx - 1)
-            if box_select_plus.collidepoint(mouse_pos):
-                game.selected_box_idx = min(len(shapes) - 1, game.selected_box_idx + 1)
-
             if box_type_minus.collidepoint(mouse_pos) or box_type_plus.collidepoint(mouse_pos):
                 if box_shape_type == "rectangle":
                     curr_box_shape["type"] = "circle"
@@ -356,7 +354,7 @@ class RightPanelAttacksTabMixin:
             if box_delay_plus.collidepoint(mouse_pos):  curr_box["delay"] += 2
             
             if box_dur_minus.collidepoint(mouse_pos): curr_box["duration"] = max(2, curr_box.get("duration", 10) - 2)
-            if box_dur_plus.collidepoint(mouse_pos):  curr_box["duration"] += 2
+            if box_dur_plus.collidepoint(mouse_pos):  curr_box["duration"] = curr_box.get("duration", 10) + 2
             
             if box_dmg_minus.collidepoint(mouse_pos): curr_box["damage"] = max(1, curr_box.get("damage", curr_att.get("damage", 1)) - 1)
             if box_dmg_plus.collidepoint(mouse_pos):  curr_box["damage"] += 1
@@ -461,9 +459,10 @@ class RightPanelAttacksTabMixin:
                 game.rebuild_objects()
         y_offset += 30
             
-        lbl_title = self.font_ui.render(f"EDIT PROJ #{game.selected_projectile_edit_idx + 1}", True, (255, 180, 100))
-        game.screen.blit(lbl_title, (1215, y_offset))
-        y_offset += 20
+        # Интегрированный выпадающий список выбора снаряда
+        proj_options = [p.get("name", f"Proj #{i+1}") for i, p in enumerate(projectiles)]
+        self.draw_dropdown("Select Proj", proj_options, game.selected_projectile_edit_idx, y_offset, "projectile_select_active_proj", mouse_clicked_this_frame, mouse_pos)
+        y_offset += 30
         
         spd_minus, spd_plus = self.draw_property_row("Speed", round(curr_proj.get("speed", 10.0), 1), y_offset)
         y_offset += 25

@@ -159,14 +159,21 @@ class RightPanelMovementTabMixin:
         game.screen.blit(lbl_title, (1215, y_offset))
         y_offset += 20
         
+        # Интегрированный выпадающий список выбора шаблона движения
+        move_options = [m.get("name", f"Move #{i+1}") for i, m in enumerate(movements)]
+        self.draw_dropdown("Select Move", move_options, game.selected_move_edit_idx, y_offset, "movement_select_active_move", mouse_clicked_this_frame, mouse_pos)
+        y_offset += 30
+        
         m_stop_minus, m_stop_plus = self.draw_property_row("Stop Dist", curr_move.setdefault("stop_dist", 0), y_offset)
         y_offset += 25
         
         phase_count_minus, phase_count_plus = self.draw_property_row("Phases", len(phases), y_offset)
         y_offset += 25
 
-        phase_select_minus, phase_select_plus = self.draw_property_row("Select Phase", f"{game.selected_box_idx + 1}/{len(phases)}", y_offset)
-        y_offset += 25
+        # Интегрированный выпадающий список выбора фазы движения
+        phase_options = [f"Phase #{i+1} ({p.get('direction', 'forward').upper()})" for i, p in enumerate(phases)]
+        self.draw_dropdown("Select Phase", phase_options, game.selected_box_idx, y_offset, "movement_select_phase", mouse_clicked_this_frame, mouse_pos)
+        y_offset += 30
 
         directions = ["forward", "backward", "to_player", "away_from_player", "teleport"]
         curr_dir = curr_phase.get("direction", "forward")
@@ -218,11 +225,6 @@ class RightPanelMovementTabMixin:
                 phases.append(copy.deepcopy(phases[-1]))
                 game.selected_box_idx = len(phases) - 1
                 game.rebuild_objects()
-
-            if phase_select_minus.collidepoint(mouse_pos):
-                game.selected_box_idx = max(0, game.selected_box_idx - 1)
-            if phase_select_plus.collidepoint(mouse_pos):
-                game.selected_box_idx = min(len(phases) - 1, game.selected_box_idx + 1)
             
             if dir_minus.collidepoint(mouse_pos):
                 curr_phase["direction"] = directions[(dir_idx - 1) % len(directions)]

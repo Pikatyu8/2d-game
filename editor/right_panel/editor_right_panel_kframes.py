@@ -38,8 +38,10 @@ class RightPanelKFramesTabMixin:
             game.selected_seq_idx = min(getattr(game, "selected_seq_idx", 0), len(seq_list) - 1)
             curr_seq = seq_list[game.selected_seq_idx]
             
-            seq_sel_minus, seq_sel_plus = self.draw_property_row("Select Seq", f"{game.selected_seq_idx + 1}/{len(seq_list)}", y_offset)
-            y_offset += 25
+            # Интегрированный выпадающий список выбора последовательности
+            seq_options = [s.get("name", f"Seq #{i+1}") for i, s in enumerate(seq_list)]
+            self.draw_dropdown("Select Seq", seq_options, game.selected_seq_idx, y_offset, "kframe_select_seq", mouse_clicked_this_frame, mouse_pos)
+            y_offset += 30
             
             rename_seq_rect = pygame.Rect(1215, y_offset, 170, 22)
             if self.draw_button(rename_seq_rect, "RENAME SEQUENCE", (60, 100, 150), (255, 255, 255), is_scrollable=True) and mouse_clicked_this_frame:
@@ -105,13 +107,6 @@ class RightPanelKFramesTabMixin:
             y_offset += 15
 
             if mouse_clicked_this_frame:
-                if seq_sel_minus.collidepoint(mouse_pos):
-                    game.selected_seq_idx = max(0, game.selected_seq_idx - 1)
-                    game.selected_step_idx = 0
-                if seq_sel_plus.collidepoint(mouse_pos):
-                    game.selected_seq_idx = min(len(seq_list) - 1, game.selected_seq_idx + 1)
-                    game.selected_step_idx = 0
-                
                 if ch_minus.collidepoint(mouse_pos): curr_seq["chance"] = max(0.0, curr_seq["chance"] - 0.1)
                 if ch_plus.collidepoint(mouse_pos):  curr_seq["chance"] = min(1.0, curr_seq["chance"] + 0.1)
                 if cd_minus.collidepoint(mouse_pos):  curr_seq["cooldown"] = max(10, curr_seq["cooldown"] - 10)
@@ -229,14 +224,10 @@ class RightPanelKFramesTabMixin:
                 game.selected_step_idx = min(getattr(game, "selected_step_idx", 0), len(steps) - 1)
                 curr_step = steps[game.selected_step_idx]
                 
-                step_sel_minus, step_sel_plus = self.draw_property_row("Select Step", f"{game.selected_step_idx + 1}/{len(steps)}", y_offset)
-                y_offset += 25
-                
-                if mouse_clicked_this_frame:
-                    if step_sel_minus.collidepoint(mouse_pos):
-                        game.selected_step_idx = max(0, game.selected_step_idx - 1)
-                    if step_sel_plus.collidepoint(mouse_pos):
-                        game.selected_step_idx = min(len(steps) - 1, game.selected_step_idx + 1)
+                # Интегрированный выпадающий список выбора шагов
+                step_options = [f"Step #{i+1} ({s.get('type', 'attack').upper()})" for i, s in enumerate(steps)]
+                self.draw_dropdown("Select Step", step_options, game.selected_step_idx, y_offset, "kframe_select_step", mouse_clicked_this_frame, mouse_pos)
+                y_offset += 30
                 
                 types = ["attack", "movement", "projectile"]
                 curr_type_idx = types.index(curr_step.get("type", "attack")) if curr_step.get("type", "attack") in types else 0

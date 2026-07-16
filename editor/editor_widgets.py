@@ -62,12 +62,8 @@ class EditorWidgetsMixin:
         game = self.game
         font = game.get_cached_font(18)
         
-        # Отрисовка названия поля
-        lbl_img = font.render(label, True, (180, 180, 180))
-        game.screen.blit(lbl_img, (1215, y_pos))
-        
-        # Отрисовка поля выпадающего списка
-        box_rect = pygame.Rect(1310, y_pos - 2, 80, 20)
+        # Интегрированный бокс выпадающего списка на всю ширину панели свойств (170px)
+        box_rect = pygame.Rect(1215, y_pos - 2, 170, 20)
         is_hovered = box_rect.collidepoint(mouse_pos)
         
         bg_color = (60, 60, 65) if is_hovered else (50, 50, 55)
@@ -75,14 +71,25 @@ class EditorWidgetsMixin:
         pygame.draw.rect(game.screen, BORDER_COLOR, box_rect, 1)
         
         current_text = options[current_idx] if 0 <= current_idx < len(options) else "None"
-        display_text = current_text
-        if len(display_text) > 8:
-            display_text = display_text[:6] + ".."
+        full_text = f"{label}: {current_text}"
+        
+        # Резервируем 25 пикселей под стрелку "v" и внутренние отступы
+        available_w = 170 - 25
+        display_text = full_text
+        w, _ = font.size(display_text)
+        
+        if w > available_w:
+            # Адаптивно обрезаем только значение в случае переполнения, не трогая метку
+            label_part = f"{label}: "
+            val_part = current_text
+            while len(val_part) > 0 and font.size(label_part + val_part + "..")[0] > available_w:
+                val_part = val_part[:-1]
+            display_text = label_part + val_part + ".."
             
         val_img = font.render(display_text, True, (255, 255, 255))
         game.screen.blit(val_img, (box_rect.left + 5, box_rect.centery - val_img.get_height() // 2))
         
-        # Стрелочка индикатора выпадающего меню
+        # Стрелочка-индикатор справа
         arrow_img = font.render("v", True, (150, 150, 150))
         game.screen.blit(arrow_img, (box_rect.right - 12, box_rect.centery - arrow_img.get_height() // 2))
         
@@ -92,11 +99,10 @@ class EditorWidgetsMixin:
                 game.active_dropdown_data = None
             else:
                 game.active_dropdown_id = dropdown_id
-                game.dropdown_just_opened = True  # Активируем блокировку мгновенного закрытия
                 game.active_dropdown_data = {
                     "id": dropdown_id,
                     "rect": box_rect,
                     "options": options,
                     "current_idx": current_idx,
-                    "y_pos_screen": y_pos  # Используем чистую Y координату
+                    "y_pos_screen": y_pos
                 }

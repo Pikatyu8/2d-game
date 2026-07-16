@@ -99,6 +99,11 @@ class RightPanelFlowTabMixin:
         game.screen.blit(lbl_title, (1215, y_offset))
         y_offset += 20
         
+        # Интегрированный выпадающий список выбора активного потока
+        flow_options = [f.get("name", f"Flow #{i+1}") for i, f in enumerate(flows)]
+        self.draw_dropdown("Select Flow", flow_options, game.selected_flow_idx, y_offset, "flow_select_active_flow", mouse_clicked_this_frame, mouse_pos)
+        y_offset += 30
+        
         ch_minus, ch_plus = self.draw_property_row("Flow Chance", round(curr_flow.setdefault("chance", 0.5), 1), y_offset)
         y_offset += 25
         cd_minus, cd_plus = self.draw_property_row("Flow CD", curr_flow.setdefault("cooldown", 180), y_offset)
@@ -142,7 +147,7 @@ class RightPanelFlowTabMixin:
         pygame.draw.rect(game.screen, right_c, right_rect)
         pygame.draw.rect(game.screen, (255, 255, 255), right_rect, 1)
         end_txt = font_lbl.render("END", True, (255, 255, 255) if sum(right_c)/3 < 128 else (0, 0, 0))
-        game.screen.blit(end_txt, (right_rect.centerx - end_txt.get_width()//2, right_rect.centery - end_txt.get_height()//2))
+        game.screen.blit(end_txt, (right_rect.centerx - end_txt.get_width()//2, y_offset + box_h//2 - end_txt.get_height()//2))
 
         y_offset += 30
 
@@ -271,14 +276,17 @@ class RightPanelFlowTabMixin:
         y_offset += 30
         
         if steps:
-            step_sel_minus, step_sel_plus = self.draw_property_row("Select Step", f"{game.selected_flow_step_idx + 1}/{len(steps)}", y_offset)
-            y_offset += 25
-            
-            if mouse_clicked_this_frame:
-                if step_sel_minus.collidepoint(mouse_pos):
-                    game.selected_flow_step_idx = max(0, game.selected_flow_step_idx - 1)
-                if step_sel_plus.collidepoint(mouse_pos):
-                    game.selected_flow_step_idx = min(len(steps) - 1, game.selected_flow_step_idx + 1)
+            # Интегрированный выпадающий список выбора шагов
+            sequences = target_enemy_raw.get("sequences", [])
+            step_options = []
+            for i, s in enumerate(steps):
+                if s.get("is_random", False):
+                    step_options.append(f"Step #{i+1} (RANDOM)")
+                else:
+                    seq_name = sequences[s.get("seq_idx", 0)].get("name", f"Seq {s.get('seq_idx', 0)+1}") if s.get("seq_idx", 0) < len(sequences) else "None"
+                    step_options.append(f"Step #{i+1} ({seq_name})")
+            self.draw_dropdown("Select Step", step_options, game.selected_flow_step_idx, y_offset, "flow_select_step", mouse_clicked_this_frame, mouse_pos)
+            y_offset += 30
 
             is_random = curr_step.setdefault("is_random", False)
             mode_text = f"Step Mode: {'RANDOM POOL' if is_random else 'SINGLE'}"
@@ -292,16 +300,14 @@ class RightPanelFlowTabMixin:
                 game.rebuild_objects()
             y_offset += 30
 
-            sequences = target_enemy_raw.get("sequences", [])
-
             # Использование выпадающего списка (dropdown) для выбора Sequence
             if not is_random:
                 seq_idx = curr_step.setdefault("seq_idx", 0)
                 seq_idx = max(0, min(seq_idx, len(sequences) - 1)) if sequences else 0
                 curr_step["seq_idx"] = seq_idx
                 
-                seq_options = [s.get("name", f"Seq #{i+1}") for i, s in enumerate(sequences)] if sequences else ["None"]
-                self.draw_dropdown("Sequence", seq_options, seq_idx, y_offset, "flow_step_sequence", mouse_clicked_this_frame, mouse_pos)
+                seq_options_list = [s.get("name", f"Seq #{i+1}") for i, s in enumerate(sequences)] if sequences else ["None"]
+                self.draw_dropdown("Sequence", seq_options_list, seq_idx, y_offset, "flow_step_sequence", mouse_clicked_this_frame, mouse_pos)
                 y_offset += 30
             else:
                 lbl_pool = self.font_ui.render("RANDOM POOL SELECTION:", True, (255, 180, 100))

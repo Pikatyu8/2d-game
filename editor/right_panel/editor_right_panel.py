@@ -22,17 +22,12 @@ class EditorRightPanelMixin(
     RightPanelFlowTabMixin,
     RightPanelProbTabMixin
 ):
-    def draw_active_dropdown_overlay(self, mouse_clicked, mouse_pos):
+    def draw_active_dropdown_overlay(self, mouse_pos):
         game = self.game
         data = game.active_dropdown_data
         options = data["options"]
         box_rect = data["rect"]
         screen_y = data["y_pos_screen"]
-        
-        # Блокировка закрытия списка на кадре его открытия
-        if getattr(game, "dropdown_just_opened", False):
-            mouse_clicked = False
-            game.dropdown_just_opened = False
         
         option_height = 20
         dropdown_rect = pygame.Rect(box_rect.left, screen_y + 18, box_rect.width, len(options) * option_height)
@@ -42,7 +37,6 @@ class EditorRightPanelMixin(
         pygame.draw.rect(game.screen, (100, 100, 110), dropdown_rect, 1)
         
         font = game.get_cached_font(16)
-        clicked_option_idx = None
         
         for idx, opt in enumerate(options):
             opt_rect = pygame.Rect(box_rect.left, screen_y + 18 + idx * option_height, box_rect.width, option_height)
@@ -51,26 +45,44 @@ class EditorRightPanelMixin(
             if is_hovered:
                 pygame.draw.rect(game.screen, (60, 110, 200), opt_rect)
                 
+            # Адаптивное попиксельное сокращение текста вариантов
+            available_w = box_rect.width - 10
             display_text = opt
-            if len(display_text) > 8:
-                display_text = display_text[:6] + ".."
+            w, _ = font.size(display_text)
+            if w > available_w:
+                while len(display_text) > 0 and font.size(display_text + "..")[0] > available_w:
+                    display_text = display_text[:-1]
+                display_text = display_text + ".."
                 
             opt_img = font.render(display_text, True, (255, 255, 255))
             game.screen.blit(opt_img, (opt_rect.left + 5, opt_rect.centery - opt_img.get_height() // 2))
-            
-            if mouse_clicked and is_hovered:
-                clicked_option_idx = idx
-                
-        if mouse_clicked:
-            if clicked_option_idx is not None:
-                game.active_dropdown_selection = (data["id"], clicked_option_idx)
-            game.active_dropdown_id = None
-            game.active_dropdown_data = None
 
     def draw_right_panel(self, mouse_clicked_this_frame, target_enemy_raw):
         game = self.game
         mouse_pos = pygame.mouse.get_pos()
         
+        # 1. Перехват, обработка и полное поглощение кликов выпадающего меню до интерфейса
+        local_clicked = mouse_clicked_this_frame
+        if getattr(game, "active_dropdown_id", None) and getattr(game, "active_dropdown_data", None):
+            data = game.active_dropdown_data
+            options = data["options"]
+            box_rect = data["rect"]
+            screen_y = data["y_pos_screen"]
+            option_height = 20
+            dropdown_rect = pygame.Rect(box_rect.left, screen_y + 18, box_rect.width, len(options) * option_height)
+            
+            if mouse_clicked_this_frame:
+                if dropdown_rect.collidepoint(mouse_pos):
+                    clicked_idx = (mouse_pos[1] - (screen_y + 18)) // option_height
+                    if 0 <= clicked_idx < len(options):
+                        game.active_dropdown_selection = (data["id"], clicked_idx)
+                
+                # Любой клик закрывает выпадающее меню
+                game.active_dropdown_id = None
+                game.active_dropdown_data = None
+                # Сигнал клика сбрасывается для предотвращения клика сквозь панель
+                local_clicked = False
+
         right_panel_rect = pygame.Rect(1200, 0, 200, SCREEN_HEIGHT)
         pygame.draw.rect(game.screen, PANEL_BG_COLOR, right_panel_rect)
         pygame.draw.line(game.screen, BORDER_COLOR, (1200, 0), (1200, SCREEN_HEIGHT), 1)
@@ -177,6 +189,37 @@ class EditorRightPanelMixin(
                         if flow_steps and game.selected_flow_step_idx < len(flow_steps):
                             flow_steps[game.selected_flow_step_idx]["seq_idx"] = selected_idx
                             game.rebuild_objects()
+                elif dropdown_id == "kframe_select_seq":
+                    game.selected_seq_idx = selected_idx
+                    game.selected_step_idx = 0
+                    game.rebuild_objects()
+                elif dropdown_id == "kframe_select_step":
+                    game.selected_step_idx = selected_idx
+                    game.rebuild_objects()
+                elif dropdown_id == "flow_select_active_flow":
+                    game.selected_flow_idx = selected_idx
+                    game.selected_flow_step_idx = 0
+                    game.rebuild_objects()
+                elif dropdown_id == "flow_select_step":
+                    game.selected_flow_step_idx = selected_idx
+                    game.rebuild_objects()
+                elif dropdown_id == "attack_select_active_attack":
+                    game.selected_attack_edit_idx = selected_idx
+                    game.selected_box_idx = 0
+                    game.rebuild_objects()
+                elif dropdown_id == "attack_select_box":
+                    game.selected_box_idx = selected_idx
+                    game.rebuild_objects()
+                elif dropdown_id == "projectile_select_active_proj":
+                    game.selected_projectile_edit_idx = selected_idx
+                    game.rebuild_objects()
+                elif dropdown_id == "movement_select_active_move":
+                    game.selected_move_edit_idx = selected_idx
+                    game.selected_box_idx = 0
+                    game.rebuild_objects()
+                elif dropdown_id == "movement_select_phase":
+                    game.selected_box_idx = selected_idx
+                    game.rebuild_objects()
 
         # Отрисовка двух строк вкладок (y = 36 и y = 59)
         if target_enemy_raw is not None and game.editor_mode == "ENEMY_EDITOR":
@@ -187,22 +230,22 @@ class EditorRightPanelMixin(
             tab_flow_rect = pygame.Rect(1270, 59, 60, 20)
             tab_prob_rect = pygame.Rect(1335, 59, 60, 20)
             
-            if self.draw_button(tab_main_rect, "GEN", (45, 45, 50), (255, 255, 255), game.inspector_tab == "MAIN") and mouse_clicked_this_frame:
+            if self.draw_button(tab_main_rect, "GEN", (45, 45, 50), (255, 255, 255), game.inspector_tab == "MAIN") and local_clicked:
                 game.inspector_tab = "MAIN"
                 game.right_panel_scroll = 0
-            if self.draw_button(tab_attacks_rect, "ATK", (45, 45, 50), (255, 255, 255), game.inspector_tab in ("ATTACKS", "DETAILED_ATTACK", "DETAILED_PROJECTILE")) and mouse_clicked_this_frame:
+            if self.draw_button(tab_attacks_rect, "ATK", (45, 45, 50), (255, 255, 255), game.inspector_tab in ("ATTACKS", "DETAILED_ATTACK", "DETAILED_PROJECTILE")) and local_clicked:
                 game.inspector_tab = "ATTACKS"
                 game.right_panel_scroll = 0
-            if self.draw_button(tab_movement_rect, "MOVE", (45, 45, 50), (255, 255, 255), game.inspector_tab in ("MOVEMENT", "DETAILED_MOVEMENT")) and mouse_clicked_this_frame:
+            if self.draw_button(tab_movement_rect, "MOVE", (45, 45, 50), (255, 255, 255), game.inspector_tab in ("MOVEMENT", "DETAILED_MOVEMENT")) and local_clicked:
                 game.inspector_tab = "MOVEMENT"
                 game.right_panel_scroll = 0
-            if self.draw_button(tab_kframes_rect, "K-FRM", (45, 45, 50), (255, 255, 255), game.inspector_tab == "K-FRAMES") and mouse_clicked_this_frame:
+            if self.draw_button(tab_kframes_rect, "K-FRM", (45, 45, 50), (255, 255, 255), game.inspector_tab == "K-FRAMES") and local_clicked:
                 game.inspector_tab = "K-FRAMES"
                 game.right_panel_scroll = 0
-            if self.draw_button(tab_flow_rect, "FLOW", (45, 45, 50), (255, 255, 255), game.inspector_tab in ("FLOW", "DETAILED_FLOW")) and mouse_clicked_this_frame:
+            if self.draw_button(tab_flow_rect, "FLOW", (45, 45, 50), (255, 255, 255), game.inspector_tab in ("FLOW", "DETAILED_FLOW")) and local_clicked:
                 game.inspector_tab = "FLOW"
                 game.right_panel_scroll = 0
-            if self.draw_button(tab_prob_rect, "PROB", (45, 45, 50), (255, 255, 255), game.inspector_tab == "PROBABILITY") and mouse_clicked_this_frame:
+            if self.draw_button(tab_prob_rect, "PROB", (45, 45, 50), (255, 255, 255), game.inspector_tab == "PROBABILITY") and local_clicked:
                 game.inspector_tab = "PROBABILITY"
                 game.right_panel_scroll = 0
 
@@ -214,30 +257,30 @@ class EditorRightPanelMixin(
         # 1. Свойства объектов в режиме Редактора Уровней
         if game.editor_mode == "LEVEL_EDITOR" and game.selected_instance and isinstance(game.selected_instance, (Platform, PlayerStart)):
             inst = game.selected_instance
-            y_offset = self.draw_level_editor_properties(inst, y_offset, mouse_clicked_this_frame, mouse_pos)
+            y_offset = self.draw_level_editor_properties(inst, y_offset, local_clicked, mouse_pos)
 
         # 2. Свойства шаблона врагов (по вкладкам)
         elif target_enemy_raw is not None:
             if game.inspector_tab == "MAIN":
-                y_offset = self.draw_enemy_main_tab(target_enemy_raw, y_offset, mouse_clicked_this_frame, mouse_pos)
+                y_offset = self.draw_enemy_main_tab(target_enemy_raw, y_offset, local_clicked, mouse_pos)
             elif game.inspector_tab == "ATTACKS":
-                y_offset = self.draw_enemy_attacks_tab(target_enemy_raw, y_offset, mouse_clicked_this_frame, mouse_pos)
+                y_offset = self.draw_enemy_attacks_tab(target_enemy_raw, y_offset, local_clicked, mouse_pos)
             elif game.inspector_tab == "DETAILED_ATTACK":
-                y_offset = self.draw_enemy_detailed_attack_tab(target_enemy_raw, y_offset, mouse_clicked_this_frame, mouse_pos)
+                y_offset = self.draw_enemy_detailed_attack_tab(target_enemy_raw, y_offset, local_clicked, mouse_pos)
             elif game.inspector_tab == "DETAILED_PROJECTILE":
-                y_offset = self.draw_enemy_detailed_projectile_tab(target_enemy_raw, y_offset, mouse_clicked_this_frame, mouse_pos)
+                y_offset = self.draw_enemy_detailed_projectile_tab(target_enemy_raw, y_offset, local_clicked, mouse_pos)
             elif game.inspector_tab == "MOVEMENT":
-                y_offset = self.draw_enemy_movement_tab(target_enemy_raw, y_offset, mouse_clicked_this_frame, mouse_pos)
+                y_offset = self.draw_enemy_movement_tab(target_enemy_raw, y_offset, local_clicked, mouse_pos)
             elif game.inspector_tab == "DETAILED_MOVEMENT":
-                y_offset = self.draw_enemy_detailed_movement_tab(target_enemy_raw, y_offset, mouse_clicked_this_frame, mouse_pos)
+                y_offset = self.draw_enemy_detailed_movement_tab(target_enemy_raw, y_offset, local_clicked, mouse_pos)
             elif game.inspector_tab == "K-FRAMES":
-                y_offset = self.draw_enemy_kframes_tab(target_enemy_raw, y_offset, mouse_clicked_this_frame, mouse_pos)
+                y_offset = self.draw_enemy_kframes_tab(target_enemy_raw, y_offset, local_clicked, mouse_pos)
             elif game.inspector_tab == "FLOW":
-                y_offset = self.draw_enemy_flow_tab(target_enemy_raw, y_offset, mouse_clicked_this_frame, mouse_pos)
+                y_offset = self.draw_enemy_flow_tab(target_enemy_raw, y_offset, local_clicked, mouse_pos)
             elif game.inspector_tab == "DETAILED_FLOW":
-                y_offset = self.draw_enemy_detailed_flow_tab(target_enemy_raw, y_offset, mouse_clicked_this_frame, mouse_pos)
+                y_offset = self.draw_enemy_detailed_flow_tab(target_enemy_raw, y_offset, local_clicked, mouse_pos)
             elif game.inspector_tab == "PROBABILITY":
-                y_offset = self.draw_enemy_probability_tab(target_enemy_raw, y_offset, mouse_clicked_this_frame, mouse_pos)
+                y_offset = self.draw_enemy_probability_tab(target_enemy_raw, y_offset, local_clicked, mouse_pos)
 
         total_height = y_offset + game.right_panel_scroll
         game.right_panel_max_scroll = max(0, total_height - (SCREEN_HEIGHT - 30))
@@ -246,4 +289,4 @@ class EditorRightPanelMixin(
         
         # Отрисовка раскрытого списка выпадающего меню поверх панелей
         if getattr(game, "active_dropdown_id", None) and getattr(game, "active_dropdown_data", None):
-            self.draw_active_dropdown_overlay(mouse_clicked_this_frame, mouse_pos)
+            self.draw_active_dropdown_overlay(mouse_pos)
