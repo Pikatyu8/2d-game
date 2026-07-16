@@ -26,7 +26,8 @@
             "angle": 0.0,
             "gravity": 0.0,
             "damage": 1,
-            "radius": 6
+            "radius": 6,
+            "shoot_cooldown": 30
         }
     ],
     "attacks": [
@@ -46,7 +47,13 @@
                     "angle": 0,
                     "delay": 0,
                     "duration": 6,
-                    "damage": 1
+                    "damage": 1,
+                    "kb_angle": 0,
+                    "kb_force": 12.0,
+                    "kb_angle_hit": 0,
+                    "kb_force_hit": 12.0,
+                    "kb_angle_parry": 0,
+                    "kb_force_parry": 6.0
                 },
                 {
                     "shape": {
@@ -59,7 +66,13 @@
                     "angle": 0,
                     "delay": 12,
                     "duration": 6,
-                    "damage": 1
+                    "damage": 1,
+                    "kb_angle": 0,
+                    "kb_force": 12.0,
+                    "kb_angle_hit": 0,
+                    "kb_force_hit": 12.0,
+                    "kb_angle_parry": 0,
+                    "kb_force_parry": 6.0
                 },
                 {
                     "shape": {
@@ -72,7 +85,13 @@
                     "angle": 0,
                     "delay": 24,
                     "duration": 10,
-                    "damage": 1
+                    "damage": 1,
+                    "kb_angle": 0,
+                    "kb_force": 12.0,
+                    "kb_angle_hit": 0,
+                    "kb_force_hit": 12.0,
+                    "kb_angle_parry": 0,
+                    "kb_force_parry": 6.0
                 }
             ]
         }
@@ -105,7 +124,10 @@
                 },
                 "offset_x": 10,
                 "offset_y": 0,
-                "type": "following"
+                "type": "following",
+                "hold_time": 0,
+                "consecutive_limit": 3,
+                "accumulate_hold": true
             },
             "steps": [
                 {
@@ -119,7 +141,9 @@
                     "delay": 15,
                     "trigger": "time"
                 }
-            ]
+            ],
+            "post_cooldown": 30
         }
-    ]
+    ],
+    "flows": []
 }

@@ -14,77 +14,27 @@
         "template": "detections.front_view",
         "shape": {
             "template": "forms.rect",
-            "w": 220,
-            "h": 70
+            "w": 271,
+            "h": 103
         },
-        "offset_x": 0,
-        "offset_y": -10
+        "offset_x": -157,
+        "offset_y": -37,
+        "angle": 0
     },
     "projectiles": [
         {
-            "name": "Heavy Axe",
-            "speed": 8.0,
+            "name": "heavy bullet",
+            "speed": 12.0,
             "angle": 0.0,
-            "gravity": 0.05,
-            "damage": 2,
-            "radius": 10
+            "gravity": 0.0,
+            "damage": 4,
+            "radius": 18,
+            "aim_at_player": true,
+            "homing": 0.15,
+            "shoot_cooldown": 0
         }
     ],
-    "attacks": [
-        {
-            "name": "Heavy Combo",
-            "cooldown": 75,
-            "windup": 35,
-            "shapes": [
-                {
-                    "shape": {
-                        "template": "forms.rect",
-                        "w": 70,
-                        "h": 50
-                    },
-                    "offset_x": 65,
-                    "offset_y": -5,
-                    "angle": 0,
-                    "delay": 0,
-                    "duration": 10,
-                    "damage": 1
-                },
-                {
-                    "shape": {
-                        "template": "forms.rect",
-                        "w": 95,
-                        "h": 60
-                    },
-                    "offset_x": 88,
-                    "offset_y": -5,
-                    "angle": 0,
-                    "delay": 16,
-                    "duration": 14,
-                    "damage": 2
-                }
-            ]
-        },
-        {
-            "name": "Quick Jab",
-            "cooldown": 40,
-            "windup": 15,
-            "shapes": [
-                {
-                    "shape": {
-                        "template": "forms.rect",
-                        "w": 50,
-                        "h": 30
-                    },
-                    "offset_x": 55,
-                    "offset_y": -5,
-                    "angle": 0,
-                    "delay": 0,
-                    "duration": 8,
-                    "damage": 1
-                }
-            ]
-        }
-    ],
+    "attacks": [],
     "movements": [
         {
             "name": "Heavy Dash",
@@ -115,60 +65,36 @@
     ],
     "sequences": [
         {
-            "name": "Slash & Retreat",
-            "chance": 0.7,
+            "name": "Seq 1",
+            "chance": 0.5,
             "cooldown": 120,
             "trigger_zone": {
                 "shape": {
                     "template": "forms.rect",
-                    "w": 90,
-                    "h": 50
+                    "w": 451,
+                    "h": 156
                 },
-                "offset_x": 10,
-                "offset_y": 0,
-                "type": "following"
+                "offset_x": -23,
+                "offset_y": -101,
+                "type": "following",
+                "hold_time": 0,
+                "consecutive_limit": 3,
+                "accumulate_hold": true
             },
             "steps": [
                 {
-                    "type": "attack",
-                    "idx": 0,
-                    "delay": 0,
-                    "trigger": "time"
-                },
-                {
-                    "type": "movement",
-                    "idx": 1,
-                    "delay": 35
-                }
-            ]
-        },
-        {
-            "name": "Surge Strike",
-            "chance": 0.5,
-            "cooldown": 100,
-            "trigger_zone": {
-                "shape": {
-                    "template": "forms.rect",
-                    "w": 180,
-                    "h": 60
-                },
-                "offset_x": 10,
-                "offset_y": 0,
-                "type": "following"
-            },
-            "steps": [
-                {
-                    "type": "movement",
+                    "type": "projectile",
                     "idx": 0,
                     "delay": 0
                 },
                 {
-                    "type": "attack",
-                    "idx": 1,
-                    "delay": 20,
-                    "trigger": "time"
+                    "type": "projectile",
+                    "idx": 0,
+                    "delay": 20
                 }
-            ]
+            ],
+            "post_cooldown": 30
         }
-    ]
+    ],
+    "flows": []
 }

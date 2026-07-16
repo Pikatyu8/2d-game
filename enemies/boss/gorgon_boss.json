@@ -27,7 +27,8 @@
             "angle": 0.0,
             "gravity": 0.0,
             "damage": 2,
-            "radius": 8
+            "radius": 8,
+            "shoot_cooldown": 30
         }
     ],
     "attacks": [
@@ -47,7 +48,13 @@
                     "angle": 0,
                     "delay": 0,
                     "duration": 15,
-                    "damage": 1
+                    "damage": 1,
+                    "kb_angle": 0,
+                    "kb_force": 12.0,
+                    "kb_angle_hit": 0,
+                    "kb_force_hit": 12.0,
+                    "kb_angle_parry": 0,
+                    "kb_force_parry": 6.0
                 },
                 {
                     "shape": {
@@ -60,7 +67,13 @@
                     "angle": 15,
                     "delay": 25,
                     "duration": 20,
-                    "damage": 3
+                    "damage": 3,
+                    "kb_angle": 0,
+                    "kb_force": 12.0,
+                    "kb_angle_hit": 0,
+                    "kb_force_hit": 12.0,
+                    "kb_angle_parry": 0,
+                    "kb_force_parry": 6.0
                 }
             ]
         },
@@ -80,7 +93,13 @@
                     "angle": 0,
                     "delay": 0,
                     "duration": 12,
-                    "damage": 2
+                    "damage": 2,
+                    "kb_angle": 0,
+                    "kb_force": 12.0,
+                    "kb_angle_hit": 0,
+                    "kb_force_hit": 12.0,
+                    "kb_angle_parry": 0,
+                    "kb_force_parry": 6.0
                 }
             ]
         }
@@ -113,7 +132,10 @@
                 },
                 "offset_x": 10,
                 "offset_y": 0,
-                "type": "following"
+                "type": "following",
+                "hold_time": 0,
+                "consecutive_limit": 3,
+                "accumulate_hold": true
             },
             "steps": [
                 {
@@ -122,7 +144,8 @@
                     "delay": 0,
                     "trigger": "time"
                 }
-            ]
+            ],
+            "post_cooldown": 30
         },
         {
             "name": "Gaze Attack",
@@ -136,7 +159,10 @@
                 },
                 "offset_x": 20,
                 "offset_y": -20,
-                "type": "following"
+                "type": "following",
+                "hold_time": 0,
+                "consecutive_limit": 3,
+                "accumulate_hold": true
             },
             "steps": [
                 {
@@ -145,7 +171,9 @@
                     "delay": 0,
                     "trigger": "time"
                 }
-            ]
+            ],
+            "post_cooldown": 30
         }
-    ]
+    ],
+    "flows": []
 }
