@@ -3,27 +3,19 @@ import pygame
 import os
 import copy
 import math
+import sys
+import json
 from config import (
     SCREEN_WIDTH, SCREEN_HEIGHT, CANVAS_OFFSET_X, CANVAS_WIDTH, ensure_level_file
 )
 from core.game_parts.game_io import GameIOMixin
 from core.game_parts.game_editor_logic import GameEditorLogicMixin
+from core.game_parts.game_hitbox import GameHitboxMixin
+from core.game_parts.game_utils import GameUtilsMixin
 from entities.platform_class import Platform
 from editor.editor_ui import EditorUI, PlayerStart
 
-def rotate_point(point, center, angle_degrees):
-    px, py = point
-    cx, cy = center
-    rad = math.radians(angle_degrees)
-    cos_a = math.cos(rad)
-    sin_a = math.sin(rad)
-    dx = px - cx
-    dy = py - cy
-    rx = dx * cos_a - dy * sin_a + cx
-    ry = dx * sin_a + dy * cos_a + cy
-    return rx, ry
-
-class Game(GameIOMixin, GameEditorLogicMixin):
+class Game(GameIOMixin, GameEditorLogicMixin, GameHitboxMixin, GameUtilsMixin):
     def __init__(self):
         pygame.init()
         
@@ -33,6 +25,7 @@ class Game(GameIOMixin, GameEditorLogicMixin):
             print(f"Mixer init error: {e}")
             
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+
         self.clock = pygame.time.Clock()
         
         ensure_level_file()
@@ -93,13 +86,11 @@ class Game(GameIOMixin, GameEditorLogicMixin):
         self.font_cache = {}
         self.debug_alpha_surf = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
         
-        # Переменные для выпадающих меню (Dropdowns)
         self.active_dropdown_id = None
         self.active_dropdown_data = None
         self.active_dropdown_selection = None
         self.dropdown_just_opened = False 
         
-        # Переменные для перетаскивания/изменения размеров хитбоксов
         self.dragging_hitbox = False
         self.hitbox_drag_mode = None
         self.hitbox_drag_start_mouse = (0, 0)
@@ -107,412 +98,25 @@ class Game(GameIOMixin, GameEditorLogicMixin):
 
         self.ui = EditorUI(self)
         self.load_level()
-
-    def get_cached_font(self, size, bold=False):
-        size = max(6, int(size))
-        key = (size, bold)
-        if key not in self.font_cache:
-            self.font_cache[key] = pygame.font.SysFont(None, size, bold=bold)
-        return self.font_cache[key]
-
-    def get_active_hitbox_rect_and_data(self):
-        from entities.enemy import Enemy
-        enemy = None
-        if self.editor_mode == "ENEMY_EDITOR":
-            enemy = self.dummy_enemy
-        elif self.editor_mode == "LEVEL_EDITOR" and self.selected_instance and isinstance(self.selected_instance, Enemy):
-            enemy = self.selected_instance
-            
-        if not enemy:
-            return None
-            
-        target_enemy_raw = enemy.raw_data
-        zoom = self.zoom if self.editor_mode in ("LEVEL_EDITOR", "ENEMY_EDITOR") else 1.0
-        camera_x = self.camera_x if self.editor_mode in ("LEVEL_EDITOR", "ENEMY_EDITOR") else 0
-        camera_y = self.camera_y if self.editor_mode in ("LEVEL_EDITOR", "ENEMY_EDITOR") else 0
-        
-        shape_dict = None
-        parent_dict = None
-        shape_data = None
-        
-        # Точное определение активной фигуры через геометрические функции класса Enemy
-        if self.inspector_tab == "MAIN":
-            parent_dict = target_enemy_raw.get("detection")
-            if parent_dict:
-                shape_dict = parent_dict.get("shape")
-                shape_data = enemy.get_detection_shape()
-        elif self.inspector_tab == "DETAILED_ATTACK":
-            attacks = target_enemy_raw.get("attacks", [])
-            if attacks and self.selected_attack_edit_idx < len(attacks):
-                curr_att = attacks[self.selected_attack_edit_idx]
-                shapes = curr_att.get("shapes", [])
-                if shapes and self.selected_box_idx < len(shapes):
-                    parent_dict = shapes[self.selected_box_idx]
-                    shape_dict = parent_dict.get("shape")
-                    shapes_data = enemy.get_attack_shapes_by_index(self.selected_attack_edit_idx)
-                    if shapes_data and self.selected_box_idx < len(shapes_data):
-                        shape_data = shapes_data[self.selected_box_idx]
-        elif self.inspector_tab == "K-FRAMES":
-            seq_list = target_enemy_raw.get("sequences", [])
-            if seq_list and self.selected_seq_idx < len(seq_list):
-                curr_seq = seq_list[self.selected_seq_idx]
-                parent_dict = curr_seq.get("trigger_zone")
-                if parent_dict:
-                    shape_dict = parent_dict.get("shape")
-                    shape_data = enemy.get_attack_zone_shape_for_attack_zone(self.selected_seq_idx)
-        elif self.inspector_tab == "DETAILED_FLOW":
-            flows = target_enemy_raw.get("flows", [])
-            if flows and self.selected_flow_idx < len(flows):
-                curr_flow = flows[self.selected_flow_idx]
-                parent_dict = curr_flow.get("trigger_zone")
-                if parent_dict:
-                    shape_dict = parent_dict.get("shape")
-                    shape_data = enemy.get_attack_zone_shape_for_flow_zone(self.selected_flow_idx)
-                    
-        if not shape_dict or not parent_dict or not shape_data:
-            return None
-            
-        stype, val = shape_data
-        
-        if stype == "circle":
-            cx, cy, r = val
-            asx = CANVAS_OFFSET_X + (cx - r - camera_x) * zoom
-            asy = (cy - r - camera_y) * zoom
-            asw = r * 2 * zoom
-            ash = r * 2 * zoom
-        else: # rectangle
-            rect, angle = val
-            asx = CANVAS_OFFSET_X + (rect.x - camera_x) * zoom
-            asy = (rect.y - camera_y) * zoom
-            asw = rect.width * zoom
-            ash = rect.height * zoom
-            
-        screen_rect = pygame.Rect(asx, asy, asw, ash)
-        return {
-            "screen_rect": screen_rect,
-            "type": stype,
-            "shape_dict": shape_dict,
-            "parent_dict": parent_dict,
-            "enemy": enemy,
-            "zoom": zoom,
-            "shape_data_val": val
-        }
-
-    def check_hitbox_interaction(self, mouse_pos, mouse_clicked):
-        if not mouse_clicked:
-            return False
-            
-        info = self.get_active_hitbox_rect_and_data()
-        if not info:
-            return False
-            
-        screen_rect = info["screen_rect"]
-        stype = info["type"]
-        shape_dict = info["shape_dict"]
-        parent_dict = info["parent_dict"]
-        enemy = info["enemy"]
-        val = info["shape_data_val"]
-        camera_x = self.camera_x if self.editor_mode in ("LEVEL_EDITOR", "ENEMY_EDITOR") else 0
-        camera_y = self.camera_y if self.editor_mode in ("LEVEL_EDITOR", "ENEMY_EDITOR") else 0
-        zoom = info["zoom"]
-        
-        mx, my = mouse_pos
-        
-        if stype == "circle":
-            cx, cy, r = val
-            scx = screen_rect.centerx
-            scy = screen_rect.centery
-            sr = screen_rect.width / 2
-            dist = math.hypot(mx - scx, my - scy)
-            
-            if dist <= sr:
-                self.dragging_hitbox = True
-                self.hitbox_drag_start_mouse = (mx, my)
-                self.hitbox_drag_start_val = {
-                    "offset_x": parent_dict.get("offset_x", 0),
-                    "offset_y": parent_dict.get("offset_y", 0),
-                    "r": shape_dict.get("r", 25),
-                    "enemy_rect_x": enemy.rect.x,
-                    "enemy_rect_y": enemy.rect.y,
-                    "enemy_rect_w": enemy.rect.width,
-                    "enemy_rect_h": enemy.rect.height,
-                    "enemy_direction": enemy.direction,
-                    "det_type": parent_dict.get("type", "following"),
-                    "is_attack": (self.inspector_tab == "DETAILED_ATTACK"),
-                    "abs_x": cx - r,
-                    "abs_y": cy - r,
-                    "scx": scx,
-                    "scy": scy
-                }
-                if dist >= 0.8 * sr:
-                    self.hitbox_drag_mode = "resize_circle"
-                else:
-                    self.hitbox_drag_mode = "move"
-                return True
-        else: # rectangle
-            rect, angle = val
-            cx = CANVAS_OFFSET_X + (rect.centerx - camera_x) * zoom
-            cy = (rect.centery - camera_y) * zoom
-            sw = rect.width * zoom
-            sh = rect.height * zoom
-            
-            # Строим виртуальный локальный неповернутый прямоугольник
-            local_rect = pygame.Rect(cx - sw/2, cy - sh/2, sw, sh)
-            # Трансформируем позицию курсора мыши в локальные неповернутые координаты хитбокса
-            local_mx, local_my = rotate_point((mx, my), (cx, cy), -angle)
-            
-            if local_rect.collidepoint(local_mx, local_my):
-                self.dragging_hitbox = True
-                self.hitbox_drag_start_mouse = (mx, my)
-                
-                self.hitbox_drag_start_val = {
-                    "offset_x": parent_dict.get("offset_x", 0),
-                    "offset_y": parent_dict.get("offset_y", 0),
-                    "w": shape_dict.get("w", 50),
-                    "h": shape_dict.get("h", 40),
-                    "enemy_rect_x": enemy.rect.x,
-                    "enemy_rect_y": enemy.rect.y,
-                    "enemy_rect_w": enemy.rect.width,
-                    "enemy_rect_h": enemy.rect.height,
-                    "enemy_direction": enemy.direction,
-                    "det_type": parent_dict.get("type", "following"),
-                    "is_attack": (self.inspector_tab == "DETAILED_ATTACK"),
-                    "abs_x": rect.x,
-                    "abs_y": rect.y,
-                    "angle": parent_dict.get("angle", shape_dict.get("angle", 0)),
-                    "scx": cx,
-                    "scy": cy
-                }
-                
-                rx = (local_mx - local_rect.left) / local_rect.width
-                ry = (local_my - local_rect.top) / local_rect.height
-                
-                # Проверяем угловые пересечения 20%-х границ для вращения
-                is_corner = (rx <= 0.2 or rx >= 0.8) and (ry <= 0.2 or ry >= 0.8)
-                
-                if is_corner:
-                    self.hitbox_drag_mode = "rotate"
-                elif rx <= 0.2:
-                    self.hitbox_drag_mode = "resize_left"
-                elif rx >= 0.8:
-                    self.hitbox_drag_mode = "resize_right"
-                elif ry <= 0.2:
-                    self.hitbox_drag_mode = "resize_top"
-                elif ry >= 0.8:
-                    self.hitbox_drag_mode = "resize_bottom"
-                else:
-                    self.hitbox_drag_mode = "move"
-                return True
-        return False
-
-    def update_hitbox_drag(self, mouse_pos):
-        if not self.dragging_hitbox:
-            return
-            
-        if not pygame.mouse.get_pressed()[0]:
-            self.dragging_hitbox = False
-            self.hitbox_drag_mode = None
-            return
-            
-        info = self.get_active_hitbox_rect_and_data()
-        if not info:
-            self.dragging_hitbox = False
-            self.hitbox_drag_mode = None
-            return
-            
-        shape_dict = info["shape_dict"]
-        parent_dict = info["parent_dict"]
-        zoom = info["zoom"]
-        stype = info["type"]
-        
-        mx, my = mouse_pos
-        start_mx, start_my = self.hitbox_drag_start_mouse
-        
-        dx_world = (mx - start_mx) / zoom
-        dy_world = (my - start_my) / zoom
-        
-        start_vals = self.hitbox_drag_start_val
-        start_abs_x = start_vals["abs_x"]
-        start_abs_y = start_vals["abs_y"]
-        
-        # Безопасная инициализация целевых координат
-        new_abs_x = start_abs_x
-        new_abs_y = start_abs_y
-        
-        if stype == "circle":
-            start_r = start_vals["r"]
-            new_r = start_r
-            
-            if self.hitbox_drag_mode == "move":
-                new_abs_x = start_abs_x + dx_world
-                new_abs_y = start_abs_y + dy_world
-            elif self.hitbox_drag_mode == "resize_circle":
-                scx = info["screen_rect"].centerx
-                scy = info["screen_rect"].centery
-                sr_new = math.hypot(mx - scx, my - scy)
-                new_r = max(5, int(sr_new / zoom))
-                start_abs_cx = start_abs_x + start_r
-                start_abs_cy = start_abs_y + start_r
-                new_abs_x = start_abs_cx - new_r
-                new_abs_y = start_abs_cy - new_r
-                
-            shape_dict["r"] = int(new_r)
-            
-        else: # rectangle
-            start_w = start_vals["w"]
-            start_h = start_vals["h"]
-            new_w = start_w
-            new_h = start_h
-            
-            if self.hitbox_drag_mode == "move":
-                new_abs_x = start_abs_x + dx_world
-                new_abs_y = start_abs_y + dy_world
-            elif self.hitbox_drag_mode == "resize_right":
-                new_w = max(5, start_w + dx_world)
-            elif self.hitbox_drag_mode == "resize_left":
-                new_w = max(5, start_w - dx_world)
-                actual_dw = new_w - start_w
-                new_abs_x = start_abs_x - actual_dw
-            elif self.hitbox_drag_mode == "resize_bottom":
-                new_h = max(5, start_h + dy_world)
-            elif self.hitbox_drag_mode == "resize_top":
-                new_h = max(5, start_h - dy_world)
-                actual_dh = new_h - start_h
-                new_abs_y = start_abs_y - actual_dh
-            elif self.hitbox_drag_mode == "rotate":
-                scx = start_vals["scx"]
-                scy = start_vals["scy"]
-                start_mouse_angle = math.atan2(start_my - scy, start_mx - scx)
-                current_mouse_angle = math.atan2(my - scy, mx - scx)
-                angle_diff_rad = current_mouse_angle - start_mouse_angle
-                angle_diff_deg = math.degrees(angle_diff_rad)
-                start_box_angle = start_vals["angle"]
-                # Вычитание дельты углов позволяет вращать хитбокс следом за курсором
-                new_angle = start_box_angle - angle_diff_deg
-                new_angle = (new_angle + 180) % 360 - 180
-                
-                parent_dict["angle"] = int(new_angle)
-                
-            shape_dict["w"] = int(new_w)
-            shape_dict["h"] = int(new_h)
-            
-        # Восстановление параметров врага и расчет новых смещений offset_x / offset_y
-        enemy_rect_x = start_vals["enemy_rect_x"]
-        enemy_rect_y = start_vals["enemy_rect_y"]
-        enemy_rect_w = start_vals["enemy_rect_w"]
-        enemy_rect_h = start_vals["enemy_rect_h"]
-        enemy_direction = start_vals["enemy_direction"]
-        det_type = start_vals["det_type"]
-        is_attack = start_vals["is_attack"]
-        
-        # Рассчитываем координаты центра фигуры
-        if stype == "circle":
-            new_cx = new_abs_x + new_r
-            new_cy = new_abs_y + new_r
-        
-        # Без центрирования: рассчитываем сдвиг напрямую от краев/Top-Left положения врага
-        if is_attack or det_type == "following":
-            if enemy_direction == -1:
-                if stype == "circle":
-                    new_ox = enemy_rect_x - new_cx - new_r
-                else:
-                    new_ox = enemy_rect_x - new_abs_x - new_w
-            else:
-                if stype == "circle":
-                    new_ox = new_cx - (enemy_rect_x + enemy_rect_w) - new_r
-                else:
-                    new_ox = new_abs_x - (enemy_rect_x + enemy_rect_w)
-        else: # Stationary
-            if stype == "circle":
-                new_ox = new_cx - enemy_rect_x - new_r
-            else:
-                new_ox = new_abs_x - enemy_rect_x
-                
-        # По вертикали - сдвиг всегда измеряется прямо от верхней грани врага
-        if stype == "circle":
-            new_oy = new_cy - enemy_rect_y - new_r
-        else:
-            new_oy = new_abs_y - enemy_rect_y
-                
-        parent_dict["offset_x"] = int(new_ox)
-        parent_dict["offset_y"] = int(new_oy)
-        
-        self.rebuild_objects()
-
-    def play_sound(self, sound_name):
-        if not pygame.mixer or not pygame.mixer.get_init():
-            return
-            
-        if sound_name not in self.sounds:
-            os.makedirs("assets", exist_ok=True)
-            sound_file = os.path.join("assets", f"{sound_name}.wav")
-            
-            if os.path.exists(sound_file):
-                try:
-                    self.sounds[sound_name] = pygame.mixer.Sound(sound_file)
-                except Exception as e:
-                    print(f"Error loading sound {sound_file}: {e}")
-                    self.sounds[sound_name] = None
-            else:
-                import array
-                import math
-                sample_rate = 44100
-                audio_data = array.array('h')
-                
-                if sound_name == "parry":
-                    duration_ms = 150
-                    num_samples = int(sample_rate * (duration_ms / 1000.0))
-                    for i in range(num_samples):
-                        t = i / sample_rate
-                        decay = math.exp(-15 * t)
-                        freq = 900 + 400 * (1.0 - t)
-                        val = int(25000 * math.sin(2 * math.pi * freq * t) * decay)
-                        audio_data.append(val)
-                elif sound_name == "damage":
-                    duration_ms = 200
-                    num_samples = int(sample_rate * (duration_ms / 1000.0))
-                    for i in range(num_samples):
-                        t = i / sample_rate
-                        decay = math.exp(-12 * t)
-                        freq = 150 - 60 * t
-                        val = int(22000 * math.sin(2 * math.pi * freq * t) * decay)
-                        audio_data.append(val)
-                else:
-                    duration_ms = 100
-                    num_samples = int(sample_rate * (duration_ms / 1000.0))
-                    for i in range(num_samples):
-                        t = i / sample_rate
-                        decay = math.exp(-10 * t)
-                        val = int(15000 * math.sin(2 * math.pi * 440 * t) * decay)
-                        audio_data.append(val)
-                        
-                try:
-                    self.sounds[sound_name] = pygame.mixer.Sound(buffer=bytes(audio_data))
-                except Exception as e:
-                    print(f"Error creating procedural sound {sound_name}: {e}")
-                    self.sounds[sound_name] = None
-                    
-        sound_obj = self.sounds.get(sound_name)
-        if sound_obj:
+    
+        if os.path.exists(".editor_selection.json"):
             try:
-                sound_obj.play()
-            except Exception as e:
-                print(f"Error playing sound {sound_name}: {e}")
+                os.remove(".editor_selection.json")
+            except Exception:
+                pass
 
-    def spawn_projectile(self, x, y, vx, vy, damage=1, radius=8, gravity=0.0, homing=0.0):
-        from entities.projectile import Projectile
-        self.projectiles.append(Projectile(x, y, vx, vy, damage, radius, gravity, homing))
-
-    def prompt_text_input(self, title, prompt, initial_value=""):
-        import tkinter as tk
-        from tkinter import simpledialog
-        root = tk.Tk()
-        root.withdraw()
-        root.lift()
-        root.attributes("-topmost", True)
-        result = simpledialog.askstring(title, prompt, initialvalue=initial_value)
-        root.destroy()
-        return result
+    def auto_save_current_preset(self):
+        if self.editor_mode == "ENEMY_EDITOR" and self.selected_preset_name:
+            preset_data = self.presets.get(self.selected_preset_name)
+            filepath = self.preset_filepaths.get(self.selected_preset_name)
+            if preset_data and filepath:
+                try:
+                    with open(filepath, "w", encoding="utf-8") as f:
+                        json.dump(preset_data, f, indent=4)
+                    self.last_preset_mod_time = os.path.getmtime(filepath)
+                    print(f"[Auto-Save] Synchronized edited preset file to disk: {filepath}")
+                except Exception as e:
+                    print(f"[Auto-Save Error] {e}")
 
     def run(self):
         running = True
@@ -521,8 +125,89 @@ class Game(GameIOMixin, GameEditorLogicMixin):
             mouse_clicked_this_frame = False
             right_clicked_this_frame = False
             mouse_pos = pygame.mouse.get_pos()
+
+            # Проверка внешних изменений пресета (Live-Reload)
+            if self.editor_mode in ("LEVEL_EDITOR", "ENEMY_EDITOR") and getattr(self, "selected_preset_name", None):
+                filepath = self.preset_filepaths.get(self.selected_preset_name)
+                if filepath and os.path.exists(filepath):
+                    try:
+                        mtime = os.path.getmtime(filepath)
+                        if not hasattr(self, "last_preset_mod_time"):
+                            self.last_preset_mod_time = mtime
+                        if mtime > self.last_preset_mod_time:
+                            self.last_preset_mod_time = mtime
+                            print(f"[Live-Reload] Изменения зафиксированы: {self.selected_preset_name}. Пересборка...")
+                            self.rebuild_objects()
+                    except Exception:
+                        pass
+                
+            # Проверка файла синхронизации выбора (вынесена на верхний уровень)
+            sel_path = ".editor_selection.json"
+            if os.path.exists(sel_path):
+                try:
+                    sel_mtime = os.path.getmtime(sel_path)
+                    if not hasattr(self, "last_sel_mod_time"):
+                        self.last_sel_mod_time = sel_mtime
+                    if sel_mtime > self.last_sel_mod_time:
+                        self.last_sel_mod_time = sel_mtime
+                        with open(sel_path, "r", encoding="utf-8") as sf:
+                            s_info = json.load(sf)
+                        
+                        p_combo_path = s_info.get("preset_name", "")
+                        p_name = os.path.splitext(os.path.basename(p_combo_path))[0].replace("_", " ").title() if p_combo_path else ""
+                        
+                        print(f"[Selection Sync Log] Detected change in .editor_selection.json. s_info: {s_info}")
+                        print(f"[Selection Sync Log] Current editor mode: {self.editor_mode}, active preset: {self.selected_preset_name}")
+                        print(f"[Selection Sync Log] Incoming preset: {p_name}")
+                        
+                        if p_name and p_name in self.presets:
+                            trigger_rebuild = False
+                            if self.selected_preset_name != p_name:
+                                self.selected_preset_name = p_name
+                                trigger_rebuild = True
+                                print(f"[Selection Sync Log] Preset changed to: {p_name}")
+                            if self.editor_mode != "ENEMY_EDITOR":
+                                self.editor_mode = "ENEMY_EDITOR"
+                                self.camera_x = 200
+                                self.camera_y = 0
+                                self.zoom = 1.0
+                                trigger_rebuild = True
+                                print(f"[Selection Sync Log] Editor mode changed to ENEMY_EDITOR")
+                                
+                            if trigger_rebuild:
+                                self.rebuild_objects()
+                                filepath = self.preset_filepaths.get(self.selected_preset_name)
+                                if filepath and os.path.exists(filepath):
+                                    self.last_preset_mod_time = os.path.getmtime(filepath)
+                                
+                            tab = s_info.get("inspector_tab")
+                            if tab:
+                                self.inspector_tab = tab
+                                print(f"[Selection Sync Log] Set inspector_tab to {tab}")
+                            if "attack_idx" in s_info:
+                                self.selected_attack_edit_idx = s_info["attack_idx"]
+                            if "box_idx" in s_info:
+                                self.selected_box_idx = s_info["box_idx"]
+                            if "seq_idx" in s_info:
+                                self.selected_seq_idx = s_info["seq_idx"]
+                            if "flow_idx" in s_info:
+                                self.selected_flow_idx = s_info["flow_idx"]
+                                
+                            self.dragging_hitbox = False
+                            self.hitbox_drag_mode = None
+                            
+                            print(f"[Selection Sync Log] Synchronized values: attack_idx={self.selected_attack_edit_idx}, box_idx={self.selected_box_idx}, seq_idx={self.selected_seq_idx}, flow_idx={getattr(self, 'selected_flow_idx', None)}")
+                        else:
+                            print(f"[Selection Sync Warning] Preset '{p_name}' not found in available presets: {list(self.presets.keys())}")
+                except Exception as e:
+                    print(f"[Selection Sync Error] Fail to parse/process selection file: {e}")
             
             for event in pygame.event.get():
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        pygame.quit()
+                        sys.exit()
+
                 if event.type == pygame.QUIT:
                     running = False
                 elif event.type == pygame.MOUSEBUTTONDOWN:
@@ -557,7 +242,7 @@ class Game(GameIOMixin, GameEditorLogicMixin):
                             self.editor_mode = "LEVEL_EDITOR"
                         elif self.editor_mode == "LEVEL_EDITOR":
                             self.editor_mode = "ENEMY_EDITOR"
-                            self.camera_x = 200  # Выравниваем камеру по центру тестовой сцены
+                            self.camera_x = 200  
                             self.camera_y = 0
                             self.zoom = 1.0  
                             self.selected_attack_edit_idx = 0
@@ -580,14 +265,12 @@ class Game(GameIOMixin, GameEditorLogicMixin):
                     elif event.key == pygame.K_TAB:
                         self.show_debug = not self.show_debug
 
-            # Обработка приоритетного перетаскивания активного хитбокса
             if self.editor_mode in ("ENEMY_EDITOR", "LEVEL_EDITOR") and CANVAS_OFFSET_X <= mouse_pos[0] <= CANVAS_OFFSET_X + CANVAS_WIDTH:
                 if self.dragging_hitbox:
                     self.update_hitbox_drag(mouse_pos)
                 else:
                     hitbox_clicked = self.check_hitbox_interaction(mouse_pos, mouse_clicked_this_frame)
                     if hitbox_clicked:
-                        # Поглощаем клик, чтобы не сбить выделение на сцене
                         mouse_clicked_this_frame = False
 
             if self.editor_mode == "GAMEPLAY" and self.player:
@@ -718,7 +401,6 @@ class Game(GameIOMixin, GameEditorLogicMixin):
 
             self.screen.blit(self.debug_alpha_surf, (0, 0))
 
-            # Интерактивный бирюзовый слой для редактирования активного хитбокса
             active_hitbox_info = self.get_active_hitbox_rect_and_data()
             if active_hitbox_info:
                 screen_rect = active_hitbox_info["screen_rect"]
@@ -728,7 +410,6 @@ class Game(GameIOMixin, GameEditorLogicMixin):
                 camera_x = self.camera_x if self.editor_mode in ("LEVEL_EDITOR", "ENEMY_EDITOR") else 0
                 camera_y = self.camera_y if self.editor_mode in ("LEVEL_EDITOR", "ENEMY_EDITOR") else 0
                 
-                # Создаем временную поверхность с поддержкой прозрачности для отрисовки повернутых элементов
                 rot_surf = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
                 
                 if stype == "rectangle":
@@ -756,11 +437,9 @@ class Game(GameIOMixin, GameEditorLogicMixin):
                             ry = px * sin_a + py * cos_a + cy
                             grid_points[i][j] = (int(rx), int(ry))
                             
-                    # 1. Заливаем основную область прямоугольника слабой прозрачностью
                     outer_corners = [grid_points[0][0], grid_points[3][0], grid_points[3][3], grid_points[0][3]]
                     pygame.draw.polygon(rot_surf, (0, 240, 255, 30), outer_corners)
                     
-                    # 2. Подсвечиваем 4 угловые 20% зоны для вращения
                     corner_tl = [grid_points[0][0], grid_points[1][0], grid_points[1][1], grid_points[0][1]]
                     corner_tr = [grid_points[2][0], grid_points[3][0], grid_points[3][1], grid_points[2][1]]
                     corner_bl = [grid_points[0][2], grid_points[1][2], grid_points[1][3], grid_points[0][3]]
@@ -771,19 +450,16 @@ class Game(GameIOMixin, GameEditorLogicMixin):
                     pygame.draw.polygon(rot_surf, (0, 240, 255, 75), corner_bl)
                     pygame.draw.polygon(rot_surf, (0, 240, 255, 75), corner_br)
                     
-                    # 3. Рисуем бирюзовые линии внутренней сетки (20% разделение)
                     pygame.draw.line(rot_surf, (0, 240, 255, 128), grid_points[1][0], grid_points[1][3], 1)
                     pygame.draw.line(rot_surf, (0, 240, 255, 128), grid_points[2][0], grid_points[2][3], 1)
                     pygame.draw.line(rot_surf, (0, 240, 255, 128), grid_points[0][1], grid_points[3][1], 1)
                     pygame.draw.line(rot_surf, (0, 240, 255, 128), grid_points[0][2], grid_points[3][2], 1)
                     
-                    # 4. Рисуем внешнюю бирюзовую рамку
                     pygame.draw.polygon(rot_surf, (0, 240, 255), outer_corners, 2)
                     
                     self.screen.blit(rot_surf, (0, 0))
                     
-                else: # circle
-                    # Рисуем заливку
+                else:
                     pygame.draw.circle(rot_surf, (0, 240, 255, 30), (int(screen_rect.centerx), int(screen_rect.centery)), int(screen_rect.width / 2))
                     self.screen.blit(rot_surf, (0, 0))
                     
@@ -791,10 +467,8 @@ class Game(GameIOMixin, GameEditorLogicMixin):
                     scy = screen_rect.centery
                     sr = screen_rect.width / 2
                     
-                    # Отрисовка внутренней границы захвата (80% от радиуса)
                     pygame.draw.circle(self.screen, (0, 240, 255, 128), (int(scx), int(scy)), int(0.8 * sr), 1)
                     
-                    # Отрисовка 4 радиальных линий-направляющих с рукоятками-круглыми кнопками
                     for angle_deg in (0, 90, 180, 270):
                         rad = math.radians(angle_deg)
                         cos_a = math.cos(rad)

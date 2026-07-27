@@ -404,12 +404,17 @@ class EnemyRenderMixin:
 
             # Рендеринг оранжевых триггерных зон последовательностей ключевых кадров
             for z_idx, zone in enumerate(self.trigger_zones):
+                # Активной зоной считается только та, что редактируется на вкладке K-FRAMES
+                is_active_trigger_edit = (inspector_tab == "K-FRAMES" and editing_trigger_idx == z_idx)
+                
                 is_in_flow = any(
                     (step.get("is_random", False) and z_idx in step.get("seq_pool", [])) or 
                     (not step.get("is_random", False) and z_idx == step.get("seq_idx", 0))
                     for flow in self.flows 
                     for step in flow.get("steps", []))
-                if is_in_flow:
+                
+                # Исключаем из отрисовки связанные с flow последовательности, ТОЛЬКО если они не выбраны для редактирования
+                if is_in_flow and not is_active_trigger_edit:
                     continue
                 
                 atk_zone_data = self.get_attack_zone_shape_for_attack_zone(z_idx)
@@ -429,9 +434,6 @@ class EnemyRenderMixin:
                     if req_hold > 0 and current_hold > 0:
                         progress = min(1.0, current_hold / req_hold)
                         base_color = (int(255 * (1.0 - progress)), int(60 + 180 * progress), int(255 * progress))
-                    
-                    # Активной зоной считается только та, что редактируется на вкладке K-FRAMES
-                    is_active_trigger_edit = (inspector_tab == "K-FRAMES" and editing_trigger_idx == z_idx)
                     
                     if not is_active_trigger_edit:
                         draw_color = (*base_color, 64)  # Накладываем полупрозрачность в неактивном режиме

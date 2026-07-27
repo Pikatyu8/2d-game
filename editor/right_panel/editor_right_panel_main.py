@@ -24,6 +24,35 @@ class RightPanelMainTabMixin:
             if self.draw_button(rename_inst_rect, "RENAME INSTANCE", (60, 100, 150), (255, 255, 255), is_scrollable=True) and mouse_clicked_this_frame:
                 game.rename_selected_instance()
             y_offset += 30
+            
+            launch_editor_rect = pygame.Rect(1215, y_offset, 170, 26)
+            if self.draw_button(launch_editor_rect, "LAUNCH NODE EDITOR", (50, 150, 80), (255, 255, 255), is_scrollable=True) and mouse_clicked_this_frame:
+                import subprocess
+                import sys
+                import os
+                try:
+                    log_file = "node_editor_error.log"
+                    # Инициализируем файл лога перед запуском
+                    lf = open(log_file, "w", encoding="utf-8")
+                    lf.write("--- СИСТЕМНЫЙ ЛОГ ЗАПУСКА NODE EDITOR ---\n")
+                    lf.flush()
+                    
+                    preset_arg = target_enemy_raw.get("preset", "") or target_enemy_raw.get("name", "")
+                    
+                    # Запускаем процесс, перенаправляя stdout и stderr в лог-файл
+                    process = subprocess.Popen(
+                        [sys.executable, "editor/node_editor.py", preset_arg],
+                        stdout=lf,
+                        stderr=lf
+                    )
+                    
+                    # Безопасно закрываем файловый дескриптор в родителе (в подпроцессе он остается активным)
+                    lf.close()
+                    
+                    print(f"[Node Editor Launcher] Spawned AI Graph Editor (PID {process.pid}). Logs redirected to {log_file}")
+                except Exception as ex:
+                    print(f"[Node Editor Launcher] Failed to spawn Dear PyGui editor: {ex}")
+            y_offset += 35
 
             m_x_minus, m_x_plus = self.draw_property_row("PosX", target_enemy_raw.get("x", 0), y_offset)
             y_offset += 26
@@ -54,6 +83,17 @@ class RightPanelMainTabMixin:
             if self.draw_button(rename_btn_rect, "RENAME PRESET", (60, 100, 150), (255, 255, 255), is_scrollable=True) and mouse_clicked_this_frame:
                 game.rename_current_preset()
             y_offset += 30
+
+            launch_editor_rect = pygame.Rect(1215, y_offset, 170, 26)
+            if self.draw_button(launch_editor_rect, "LAUNCH NODE EDITOR", (50, 150, 80), (255, 255, 255), is_scrollable=True) and mouse_clicked_this_frame:
+                import subprocess
+                import sys
+                try:
+                    subprocess.Popen([sys.executable, "editor/node_editor.py", game.selected_preset_name or ""])
+                    print("[Node Editor Launcher] Spawned AI Graph Editor.")
+                except Exception as ex:
+                    print(f"[Node Editor Launcher] Failed to spawn Dear PyGui editor: {ex}")
+            y_offset += 35
 
             hp_minus, hp_plus = self.draw_property_row("Base HP", target_enemy_raw.get("hp", 3), y_offset)
             y_offset += 26

@@ -1,7 +1,7 @@
 # core/physics.py
 import pygame
 import math
-import colorsys  # Добавлен импорт для работы с цветовыми пространствами
+import colorsys
 
 def apply_movement_and_collisions(rect, vx, vy, platforms):
     collided_x = False
@@ -26,8 +26,6 @@ def apply_movement_and_collisions(rect, vx, vy, platforms):
                 
     return on_ground, vy, collided_x
 
-
-# --- Математические функции для теоремы разделяющей оси (SAT) при повернутых хитбоксах ---
 def get_axes(poly):
     axes = []
     for i in range(len(poly)):
@@ -108,8 +106,6 @@ def shapes_intersect(type_a, val_a, type_b, val_b):
         
     return collides_polygon_polygon(poly_a, poly_b)
 
-
-# --- Функции парсинга и расчета гармонических (аналогичных) цветов ---
 def parse_hex_color(hex_str):
     if not hex_str:
         return None
@@ -127,7 +123,6 @@ def get_analogous_colors(rgb):
     r, g, b = [x / 255.0 for x in rgb]
     h, s, v = colorsys.rgb_to_hsv(r, g, b)
     
-    # Смещение Hue на цветовом колесе (влево и вправо на 30 градусов)
     h_left = (h - 30.0 / 360.0) % 1.0
     h_right = (h + 30.0 / 360.0) % 1.0
     
@@ -139,3 +134,15 @@ def get_analogous_colors(rgb):
         tuple(rgb),
         tuple(int(x * 255) for x in rgb_right)
     )
+
+def rotate_point(point, center, angle_degrees):
+    px, py = point
+    cx, cy = center
+    rad = math.radians(angle_degrees)
+    cos_a = math.cos(rad)
+    sin_a = math.sin(rad)
+    dx = px - cx
+    dy = py - cy
+    rx = dx * cos_a - dy * sin_a + cx
+    ry = dx * sin_a + dy * cos_a + cy
+    return rx, ry

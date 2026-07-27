@@ -8,17 +8,21 @@
     "movement_config": {
         "type_move": "walking",
         "speed": 0.8,
-        "range_x": 60
+        "range_x": 60,
+        "stop_dist": 60,
+        "patrol_on_platform": false
     },
     "detection": {
         "template": "detections.front_view",
         "shape": {
             "template": "forms.rect",
-            "w": 350,
-            "h": 100
+            "type": "rectangle",
+            "w": 557,
+            "h": 157
         },
-        "offset_x": 0,
-        "offset_y": -15
+        "offset_x": -310,
+        "offset_y": -36,
+        "angle": 0
     },
     "projectiles": [
         {
@@ -28,6 +32,8 @@
             "gravity": 0.0,
             "damage": 2,
             "radius": 8,
+            "aim_at_player": false,
+            "homing": 0.0,
             "shoot_cooldown": 30
         }
     ],
@@ -40,6 +46,7 @@
                 {
                     "shape": {
                         "template": "forms.rect",
+                        "type": "rectangle",
                         "w": 80,
                         "h": 60
                     },
@@ -49,16 +56,16 @@
                     "delay": 0,
                     "duration": 15,
                     "damage": 1,
-                    "kb_angle": 0,
-                    "kb_force": 12.0,
                     "kb_angle_hit": 0,
                     "kb_force_hit": 12.0,
                     "kb_angle_parry": 0,
-                    "kb_force_parry": 6.0
+                    "kb_force_parry": 6.0,
+                    "sprite_dir": "forward"
                 },
                 {
                     "shape": {
                         "template": "forms.rect",
+                        "type": "rectangle",
                         "w": 140,
                         "h": 80
                     },
@@ -68,12 +75,11 @@
                     "delay": 25,
                     "duration": 20,
                     "damage": 3,
-                    "kb_angle": 0,
-                    "kb_force": 12.0,
                     "kb_angle_hit": 0,
                     "kb_force_hit": 12.0,
                     "kb_angle_parry": 0,
-                    "kb_force_parry": 6.0
+                    "kb_force_parry": 6.0,
+                    "sprite_dir": "forward"
                 }
             ]
         },
@@ -85,21 +91,21 @@
                 {
                     "shape": {
                         "template": "forms.rect",
-                        "w": 300,
-                        "h": 40
+                        "type": "rectangle",
+                        "w": 258,
+                        "h": 107
                     },
-                    "offset_x": 203,
-                    "offset_y": -45,
+                    "offset_x": 28,
+                    "offset_y": -25,
                     "angle": 0,
                     "delay": 0,
                     "duration": 12,
                     "damage": 2,
-                    "kb_angle": 0,
-                    "kb_force": 12.0,
                     "kb_angle_hit": 0,
                     "kb_force_hit": 12.0,
                     "kb_angle_parry": 0,
-                    "kb_force_parry": 6.0
+                    "kb_force_parry": 6.0,
+                    "sprite_dir": "forward"
                 }
             ]
         }
@@ -107,6 +113,7 @@
     "movements": [
         {
             "name": "Boss Leap",
+            "stop_dist": 0,
             "phases": [
                 {
                     "direction": "to_player",
@@ -124,9 +131,11 @@
             "name": "Boss Cleave Combo",
             "chance": 0.6,
             "cooldown": 90,
+            "post_cooldown": 30,
             "trigger_zone": {
                 "shape": {
                     "template": "forms.rect",
+                    "type": "rectangle",
                     "w": 130,
                     "h": 90
                 },
@@ -144,16 +153,17 @@
                     "delay": 0,
                     "trigger": "time"
                 }
-            ],
-            "post_cooldown": 30
+            ]
         },
         {
             "name": "Gaze Attack",
             "chance": 0.4,
             "cooldown": 120,
+            "post_cooldown": 30,
             "trigger_zone": {
                 "shape": {
                     "template": "forms.rect",
+                    "type": "rectangle",
                     "w": 300,
                     "h": 60
                 },
@@ -171,8 +181,7 @@
                     "delay": 0,
                     "trigger": "time"
                 }
-            ],
-            "post_cooldown": 30
+            ]
         }
     ],
     "flows": []
