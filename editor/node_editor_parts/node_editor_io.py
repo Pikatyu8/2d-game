@@ -46,7 +46,6 @@ class NodeEditorIOMixin:
         self.pins_registry.clear()
         self.pin_to_node.clear()
         
-        # Загружаем шаблоны для корректного раскрытия параметров
         templates = {}
         if os.path.exists(TEMPLATES_FILE):
             try:
@@ -55,10 +54,8 @@ class NodeEditorIOMixin:
             except Exception as e:
                 print(f"[Node Editor] Error loading templates: {e}")
                 
-        # Раскрываем все шаблоны перед разбором графа
         resolved_data = resolve_json(preset_data, templates)
         
-        # Считываем свойства Root из раскрытых данных, сохраняя оригинальные шаблоны из preset_data
         raw_det = resolved_data.get("detection", {})
         raw_det_preset = preset_data.get("detection", {})
         raw_shape_preset = raw_det_preset.get("shape", {})
@@ -146,7 +143,6 @@ class NodeEditorIOMixin:
                 
                 link_id = dpg.add_node_link(p_hitboxes_out, p_hb_in, parent="editor_tag")
                 self.links_data[link_id] = (p_hitboxes_out, p_hb_in)
-                print(f"[Node Editor Link Log] Created attack-to-hitbox link from {p_hitboxes_out} to {p_hb_in}")
                 
         movement_nodes = []
         for mov in resolved_data.get("movements", []):
@@ -174,7 +170,6 @@ class NodeEditorIOMixin:
                 
                 link_id = dpg.add_node_link(p_phases_out, p_phase_in, parent="editor_tag")
                 self.links_data[link_id] = (p_phases_out, p_phase_in)
-                print(f"[Node Editor Link Log] Created movement-to-phase link from {p_phases_out} to {p_phase_in}")
                 
         projectile_nodes = []
         for proj in resolved_data.get("projectiles", []):
@@ -193,7 +188,7 @@ class NodeEditorIOMixin:
             projectile_nodes.append(self.nodes_data[proj_node_id])
 
         sequence_nodes = []
-        p_root_seqs = list(root_node.output_pins.keys())[1]  # Выход "Sequences Link (Exec)"
+        p_root_seqs = list(root_node.output_pins.keys())[1]  
         for seq_idx, seq in enumerate(resolved_data.get("sequences", [])):
             preset_seq_list = preset_data.get("sequences", [])
             preset_seq = preset_seq_list[seq_idx] if seq_idx < len(preset_seq_list) else {}
@@ -228,14 +223,11 @@ class NodeEditorIOMixin:
             seq_node = self.nodes_data[seq_node_id]
             sequence_nodes.append(seq_node)
 
-            # Автоматически соединяем порт Root со входом последовательности
             p_seq_in = list(seq_node.input_pins.keys())[0]
             link_id = dpg.add_node_link(p_root_seqs, p_seq_in, parent="editor_tag")
             self.links_data[link_id] = (p_root_seqs, p_seq_in)
-            print(f"[Node Editor Link Log] Automatically created root-to-sequence link from {p_root_seqs} to {p_seq_in}")
             
             steps_pins = seq_node.properties.get("steps_pins", [])
-            print(f"[Node Editor Link Log] Connecting sequence '{seq_props['name']}' steps ({len(steps_pins)} pins)")
             for step_idx, step_pin_id in enumerate(steps_pins):
                 step_data = seq_props["steps"][step_idx]
                 stype = step_data.get("type", "attack")
@@ -253,9 +245,9 @@ class NodeEditorIOMixin:
                     p_act_in = list(target_node.input_pins.keys())[0]
                     link_id = dpg.add_node_link(step_pin_id, p_act_in, parent="editor_tag")
                     self.links_data[link_id] = (step_pin_id, p_act_in)
-                    print(f"[Node Editor Link Log] Created step link: {step_pin_id} -> {p_act_in} ({stype} idx {sidx})")
 
-        p_root_flows = list(root_node.output_pins.keys())[0]  # Выход "Flows Link (Behavior)"
+        flow_nodes = []
+        p_root_flows = list(root_node.output_pins.keys())[0]  
         for flow_idx, flow in enumerate(resolved_data.get("flows", [])):
             preset_flow_list = preset_data.get("flows", [])
             preset_flow = preset_flow_list[flow_idx] if flow_idx < len(preset_flow_list) else {}
@@ -292,14 +284,13 @@ class NodeEditorIOMixin:
                 
             flow_node_id = self.create_flow_node(flow_props)
             flow_node = self.nodes_data[flow_node_id]
+            flow_nodes.append(flow_node)
             
             p_flow_parent = list(flow_node.input_pins.keys())[0]
             link_id = dpg.add_node_link(p_root_flows, p_flow_parent, parent="editor_tag")
             self.links_data[link_id] = (p_root_flows, p_flow_parent)
-            print(f"[Node Editor Link Log] Created root-to-flow link from {p_root_flows} to {p_flow_parent}")
             
             flow_steps_pins = flow_node.properties.get("steps_pins", [])
-            print(f"[Node Editor Link Log] Connecting flow '{flow_props['name']}' steps ({len(flow_steps_pins)} pins)")
             for step_idx, step_pin_id in enumerate(flow_steps_pins):
                 step_data = flow_props["steps"][step_idx]
                 is_random = step_data.get("is_random", False)
@@ -311,16 +302,61 @@ class NodeEditorIOMixin:
                             p_seq_trigger = list(sequence_nodes[sidx].input_pins.keys())[0]
                             link_id = dpg.add_node_link(step_pin_id, p_seq_trigger, parent="editor_tag")
                             self.links_data[link_id] = (step_pin_id, p_seq_trigger)
-                            print(f"[Node Editor Link Log] Created random-flow-to-seq link: {step_pin_id} -> {p_seq_trigger} (seq idx {sidx})")
                 else:
                     sidx = step_data.get("seq_idx", 0)
                     if sidx < len(sequence_nodes):
                         p_seq_trigger = list(sequence_nodes[sidx].input_pins.keys())[0]
                         link_id = dpg.add_node_link(step_pin_id, p_seq_trigger, parent="editor_tag")
                         self.links_data[link_id] = (step_pin_id, p_seq_trigger)
-                        print(f"[Node Editor Link Log] Created direct-flow-to-seq link: {step_pin_id} -> {p_seq_trigger} (seq idx {sidx})")
+
+        for order_idx, order_data in enumerate(resolved_data.get("orders", [])):
+            preset_order_list = preset_data.get("orders", [])
+            preset_order = preset_order_list[order_idx] if order_idx < len(preset_order_list) else {}
+            preset_tz = preset_order.get("trigger_zone", {})
+            preset_shape = preset_tz.get("shape", {})
+
+            order_props = {
+                "name": order_data.get("name", "Order"),
+                "chance": order_data.get("chance", 1.0),
+                "cooldown": order_data.get("cooldown", 120),
+                "post_cooldown": order_data.get("post_cooldown", 30),
+                "trig_shape_template": preset_shape.get("template", "forms.rect"),
+                "trig_shape_type": order_data.get("trigger_zone", {}).get("shape", {}).get("type", "rectangle"),
+                "trig_w": order_data.get("trigger_zone", {}).get("shape", {}).get("w", 150),
+                "trig_h": order_data.get("trigger_zone", {}).get("shape", {}).get("h", 60),
+                "trig_r": order_data.get("trigger_zone", {}).get("shape", {}).get("r", 75),
+                "trig_offset_x": order_data.get("trigger_zone", {}).get("offset_x", 0),
+                "trig_offset_y": order_data.get("trigger_zone", {}).get("offset_y", 0),
+                "trig_type": order_data.get("trigger_zone", {}).get("type", "following"),
+                "trig_hold_time": order_data.get("trigger_zone", {}).get("hold_time", 0),
+                "trig_consecutive_limit": order_data.get("trigger_zone", {}).get("consecutive_limit", 3),
+                "trig_accumulate_hold": order_data.get("trigger_zone", {}).get("accumulate_hold", True)
+            }
+            order_node_id = self.create_order_node(order_props)
+            order_node = self.nodes_data[order_node_id]
+            
+            if "pos" in order_data:
+                dpg.set_item_pos(order_node_id, order_data["pos"])
+                
+            for step_item in order_data.get("steps", []):
+                self.add_order_step(order_node_id)
+                step_pins = order_node.properties.get("steps_pins", [])
+                if step_pins:
+                    target_pin_in = step_pins[-1]
+                    
+                    for conn in step_item.get("connections", []):
+                        conn_type = conn.get("type")
+                        conn_name = conn.get("name")
+                        
+                        for match_node in self.nodes_data.values():
+                            if match_node.type == conn_type and match_node.properties.get("name") == conn_name:
+                                order_pin_out = match_node.properties.get("order_pin")
+                                if order_pin_out:
+                                    link_id = dpg.add_node_link(order_pin_out, target_pin_in, parent="editor_tag")
+                                    self.links_data[link_id] = (order_pin_out, target_pin_in)
 
         self.auto_arrange()
+        self.rebuild_all_order_buttons()
 
     def export_graph_to_json(self):
         self.sync_with_dpg()
@@ -336,8 +372,9 @@ class NodeEditorIOMixin:
             return None
             
         det_shape_type = root_node.properties.get("det_shape_type", "rectangle")
+        det_template = "forms.circle" if det_shape_type == "circle" else "forms.rect"
         det_shape = {
-            "template": root_node.properties.get("det_shape_template", "forms.rect"),
+            "template": det_template,
             "type": det_shape_type
         }
         if det_shape_type == "circle":
@@ -371,7 +408,8 @@ class NodeEditorIOMixin:
             "attacks": [],
             "movements": [],
             "sequences": [],
-            "flows": []
+            "flows": [],
+            "orders": []
         }
         
         sorted_attacks = sorted([n for n in self.nodes_data.values() if n.type == "Attack"], key=lambda x: dpg.get_item_pos(x.id)[1])
@@ -423,8 +461,9 @@ class NodeEditorIOMixin:
             connected_hitboxes.sort(key=lambda x: x.properties.get("delay", 0))
             for hb in connected_hitboxes:
                 hb_shape_type = hb.properties.get("shape_type", "rectangle")
+                hb_template = "forms.circle" if hb_shape_type == "circle" else "forms.rect"
                 hb_shape = {
-                    "template": hb.properties.get("shape_template", "forms.rect"),
+                    "template": hb_template,
                     "type": hb_shape_type
                 }
                 if hb_shape_type == "circle":
@@ -508,8 +547,9 @@ class NodeEditorIOMixin:
 
         for seq_node in sorted_sequences:
             seq_shape_type = seq_node.properties.get("trig_shape_type", "rectangle")
+            seq_template = "forms.circle" if seq_shape_type == "circle" else "forms.rect"
             seq_shape = {
-                "template": seq_node.properties.get("trig_shape_template", "forms.rect"),
+                "template": seq_template,
                 "type": seq_shape_type
             }
             if seq_shape_type == "circle":
@@ -573,8 +613,9 @@ class NodeEditorIOMixin:
 
         for flow_node in sorted_flows:
             flow_shape_type = flow_node.properties.get("trig_shape_type", "rectangle")
+            flow_template = "forms.circle" if flow_shape_type == "circle" else "forms.rect"
             flow_shape = {
-                "template": flow_node.properties.get("trig_shape_template", "forms.rect"),
+                "template": flow_template,
                 "type": flow_shape_type
             }
             if flow_shape_type == "circle":
@@ -628,5 +669,57 @@ class NodeEditorIOMixin:
                 
             flow_dict["steps"].sort(key=lambda x: x["delay"])
             export_data["flows"].append(flow_dict)
+
+        for node_id, node in self.nodes_data.items():
+            if node.type == "Order":
+                pos = dpg.get_item_pos(node_id)
+                order_shape_type = node.properties.get("trig_shape_type", "rectangle")
+                order_template = "forms.circle" if order_shape_type == "circle" else "forms.rect"
+                order_shape = {
+                    "template": order_template,
+                    "type": order_shape_type
+                }
+                if order_shape_type == "circle":
+                    order_shape["r"] = node.properties.get("trig_r", 75)
+                else:
+                    order_shape["w"] = node.properties.get("trig_w", 150)
+                    order_shape["h"] = node.properties.get("trig_h", 60)
+
+                order_dict = {
+                    "name": node.properties.get("name", "Order"),
+                    "pos": pos,
+                    "chance": node.properties.get("chance", 1.0),
+                    "cooldown": node.properties.get("cooldown", 120),
+                    "post_cooldown": node.properties.get("post_cooldown", 30),
+                    "trigger_zone": {
+                        "shape": order_shape,
+                        "offset_x": node.properties.get("trig_offset_x", 0),
+                        "offset_y": node.properties.get("trig_offset_y", 0),
+                        "type": node.properties.get("trig_type", "following"),
+                        "hold_time": node.properties.get("trig_hold_time", 0),
+                        "consecutive_limit": node.properties.get("trig_consecutive_limit", 3),
+                        "accumulate_hold": node.properties.get("trig_accumulate_hold", True)
+                    },
+                    "steps": []
+                }
+                for pin_id in node.properties.get("steps_pins", []):
+                    pin_prop = node.input_pins[pin_id].properties
+                    step_idx = pin_prop["index"]
+                    
+                    linked_connections = []
+                    for _, (p_out, p_in) in self.links_data.items():
+                        if p_in == pin_id:
+                            out_node_id = self.pin_to_node.get(p_out)
+                            if out_node_id and out_node_id in self.nodes_data:
+                                out_node = self.nodes_data[out_node_id]
+                                linked_connections.append({
+                                    "type": out_node.type,
+                                    "name": out_node.properties.get("name")
+                                })
+                    order_dict["steps"].append({
+                        "index": step_idx,
+                        "connections": linked_connections
+                    })
+                export_data["orders"].append(order_dict)
             
         return export_data

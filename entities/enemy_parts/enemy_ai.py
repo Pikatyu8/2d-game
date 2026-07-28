@@ -1,5 +1,3 @@
-# START OF FILE enemy_ai.py
-
 # entities/enemy_parts/enemy_ai.py
 import pygame
 import math
@@ -33,6 +31,12 @@ class EnemyAILogicMixin(AICombatMixin, AIFlowMixin, AIActionProcessorMixin):
             if seq["_cooldown_timer"] > 0:
                 seq["_cooldown_timer"] -= 1
 
+        # Обновление КД цепочек порядка
+        for order in getattr(self, "orders", []):
+            order.setdefault("_cooldown_timer", 0)
+            if order["_cooldown_timer"] > 0:
+                order["_cooldown_timer"] -= 1
+
         if abs(self.knockback_vx) > 0.1:
             self.knockback_vx *= 0.85
         else:
@@ -53,9 +57,12 @@ class EnemyAILogicMixin(AICombatMixin, AIFlowMixin, AIActionProcessorMixin):
         if not hasattr(self, "trigger_hold_timers"):
             self.trigger_hold_timers = {}
             
-        is_any_action_running = len(self.running_actions) > 0 or self.active_flow is not None or self.running_sequences
+        is_any_action_running = len(self.running_actions) > 0 or self.active_flow is not None or self.running_sequences or getattr(self, "active_order", None) is not None
         
+        # Обновление таймеров удержания Sequences
         for seq_idx, seq in enumerate(self.sequences):
+            if seq_idx in getattr(self, "connected_seq_indices", set()):
+                continue
             key = f"seq_{seq_idx}"
             self.trigger_hold_timers.setdefault(key, 0)
             if self.check_player_in_zone(player.rect, seq_idx):
@@ -64,10 +71,23 @@ class EnemyAILogicMixin(AICombatMixin, AIFlowMixin, AIActionProcessorMixin):
                 if not is_any_action_running:
                     self.trigger_hold_timers[key] = max(0, self.trigger_hold_timers[key] - 2)
 
+        # Обновление таймеров удержания Flows
         for flow_idx, flow in enumerate(self.flows):
+            if flow_idx in getattr(self, "connected_flow_indices", set()):
+                continue
             key = f"flow_{flow_idx}"
             self.trigger_hold_timers.setdefault(key, 0)
             if self.check_player_in_flow_zone(player.rect, flow_idx):
+                self.trigger_hold_timers[key] += 1
+            else:
+                if not is_any_action_running:
+                    self.trigger_hold_timers[key] = max(0, self.trigger_hold_timers[key] - 2)
+
+        # Обновление таймеров удержания Orders
+        for o_idx, order in enumerate(getattr(self, "orders", [])):
+            key = f"order_{o_idx}"
+            self.trigger_hold_timers.setdefault(key, 0)
+            if self.check_player_in_order_zone(player.rect, o_idx):
                 self.trigger_hold_timers[key] += 1
             else:
                 if not is_any_action_running:
@@ -77,7 +97,7 @@ class EnemyAILogicMixin(AICombatMixin, AIFlowMixin, AIActionProcessorMixin):
 
         # ОБНОВЛЕНИЕ АКТИВНОГО FLOW
         if self.active_flow is not None:
-            flow_color = self.active_flow.get("color") # Получаем цвет текущего флоу
+            flow_color = self.active_flow.get("color") 
             for step in self.active_flow.get("steps", []):
                 if step.get("delay", 0) == self.active_flow_timer:
                     if step.get("is_random", False) and step.get("seq_pool"):
@@ -113,7 +133,6 @@ class EnemyAILogicMixin(AICombatMixin, AIFlowMixin, AIActionProcessorMixin):
                         if not hasattr(self, "running_sequences"):
                             self.running_sequences = []
                         
-                        # Цвет флоу имеет приоритет перед цветом входящих в него последовательностей
                         seq_color = flow_color if flow_color is not None else self.sequences[s_idx].get("color")
                         self.running_sequences.append({
                             "sequence": copy.deepcopy(self.sequences[s_idx]),
@@ -129,6 +148,48 @@ class EnemyAILogicMixin(AICombatMixin, AIFlowMixin, AIActionProcessorMixin):
                 self.active_flow = None
                 self.active_flow_timer = 0
                 self.attack_cooldown_timer = flow_ref.get("post_cooldown", 30)
+
+        # ОБНОВЛЕНИЕ АКТИВНОГО ORDER (МАСТЕР-ЦЕПОЧКИ)
+        if getattr(self, "active_order", None) is not None:
+            order_ref = self.active_order
+            steps = order_ref.get("steps", [])
+            
+            # Следующий шаг порядка активируется только после полного завершения действий предыдущего
+            if len(self.running_actions) == 0 and not self.running_sequences:
+                if getattr(self, "active_order_step_idx", 0) < len(steps):
+                    current_step = steps[self.active_order_step_idx]
+                    connections = current_step.get("connections", [])
+                    
+                    if connections:
+                        # Случайный выбор (branching) при наличии нескольких связей на шаге
+                        import random
+                        chosen_conn = random.choice(connections)
+                        c_type = chosen_conn.get("type")
+                        c_name = chosen_conn.get("name")
+                        
+                        if c_type == "Sequence":
+                            for s_idx, seq in enumerate(self.sequences):
+                                if seq.get("name") == c_name:
+                                    self.running_sequences.append({
+                                        "sequence": copy.deepcopy(seq),
+                                        "timer": 0,
+                                        "color": seq.get("color")
+                                    })
+                                    break
+                        elif c_type == "Flow":
+                            for f_idx, flow in enumerate(self.flows):
+                                if flow.get("name") == c_name:
+                                    self.active_flow = flow
+                                    self.active_flow_timer = 0
+                                    break
+                                    
+                    self.active_order_step_idx += 1
+                else:
+                    # Цепочка порядка завершена
+                    order_cd = order_ref.get("cooldown", 120)
+                    order_ref["_cooldown_timer"] = order_cd
+                    self.active_order = None
+                    self.attack_cooldown_timer = order_ref.get("post_cooldown", 30)
 
         # ОБНОВЛЕНИЕ ВСЕХ ПАРАЛЛЕЛЬНО ЗАПУЩЕННЫХ ПОСЛЕДОВАТЕЛЬНОСТЕЙ
         if not hasattr(self, "running_sequences"):
@@ -146,7 +207,7 @@ class EnemyAILogicMixin(AICombatMixin, AIFlowMixin, AIActionProcessorMixin):
         for run_seq in self.running_sequences:
             seq = run_seq["sequence"]
             timer = run_seq["timer"]
-            seq_color = run_seq.get("color") # Контекстный цвет выполнения
+            seq_color = run_seq.get("color") 
             
             for step in seq.get("steps", []):
                 if step.get("delay", 0) == timer:
@@ -198,18 +259,19 @@ class EnemyAILogicMixin(AICombatMixin, AIFlowMixin, AIActionProcessorMixin):
             self.windup_phase = first_atk.get("windup_phase", 0.0)
             self.attack_windup_timer = first_atk.get("windup_timer", 0)
             self.attack_windup_max = first_atk.get("windup_max", 35)
+            self.active_execution_color = first_atk.get("execution_color")
         else:
             self.is_winding_up = False
             self.is_swinging = False
             self.attack_timeline_timer = 0
             self.attack_total_duration = 0
+            self.active_execution_color = None
 
-        # СВЕДЕННАЯ И ОПТИМИЗИРОВАННАЯ ЛОГИКА ДВИЖЕНИЯ ПАТРУЛИРОВАНИЯ И ПРЕСЛЕДОВАНИЯ
-        if self.active_flow is None and not self.running_sequences and not self.running_actions:
+        # ДВИЖЕНИЕ ПАТРУЛИРОВАНИЯ И ПРЕСЛЕДОВАНИЯ
+        if self.active_flow is None and not self.running_sequences and not self.running_actions and getattr(self, "active_order", None) is None:
             move_cfg = self.config.get("movement_config", {})
             global_stop_dist = move_cfg.setdefault("stop_dist", 60)
             
-            # 1. Расчет границ платформы один раз за кадр
             if move_cfg.get("patrol_on_platform", False) and platforms:
                 standing_plat = None
                 min_dist = float('inf')
@@ -229,7 +291,6 @@ class EnemyAILogicMixin(AICombatMixin, AIFlowMixin, AIActionProcessorMixin):
                 self.min_x = self.start_x - self.range_x
                 self.max_x = self.start_x + self.range_x
 
-            # 2. Обновление состояния преследования / задержки патрулирования
             if self.state == "post_action":
                 self.post_action_timer -= 1
                 vx = self.post_action_vx
@@ -257,6 +318,8 @@ class EnemyAILogicMixin(AICombatMixin, AIFlowMixin, AIActionProcessorMixin):
                         
                         stop_distances = []
                         for idx in range(len(self.trigger_zones)):
+                            if idx in getattr(self, "connected_seq_indices", set()):
+                                continue
                             is_in_flow = any(
                                 (step.get("is_random", False) and idx in step.get("seq_pool", [])) or 
                                 (not step.get("is_random", False) and idx == step.get("seq_idx", 0))
@@ -266,7 +329,12 @@ class EnemyAILogicMixin(AICombatMixin, AIFlowMixin, AIActionProcessorMixin):
                                 stop_distances.append(self.get_stopping_distance(idx))
                                 
                         for f_idx in range(len(self.flows)):
+                            if f_idx in getattr(self, "connected_flow_indices", set()):
+                                continue
                             stop_distances.append(self.get_flow_stopping_distance(f_idx))
+
+                        for o_idx in range(len(self.orders)):
+                            stop_distances.append(self.get_order_stopping_distance(o_idx))
                             
                         raw_stop_dist = max(stop_distances) if stop_distances else 5
                         trigger_stop_dist = raw_stop_dist + self.rect.width / 2 + player.rect.width / 2
@@ -276,18 +344,13 @@ class EnemyAILogicMixin(AICombatMixin, AIFlowMixin, AIActionProcessorMixin):
                             vx = (dx / distance) * (self.speed * 1.4)
                             self.vy = (dy / distance) * (self.speed * 1.4)
                             
-                            # Применение перпендикулярной силы для обхода препятствий
                             if getattr(self, "was_collided_x", False):
-                                # Столкнулись по горизонтали (стена) -> вертикальное движение к игроку
                                 dir_y = -1 if dy < 0 else 1 if dy > 0 else -1
                                 self.vy = dir_y * (self.speed * 1.4)
-                                # Легкий горизонтальный прижим для обтекания препятствий
                                 vx = vx * 0.2
                             elif getattr(self, "was_collided_y", False):
-                                # Столкнулись по вертикали (пол/потолок) -> горизонтальное движение к игроку
                                 dir_x = -1 if dx < 0 else 1 if dx > 0 else 1
                                 vx = dir_x * (self.speed * 1.4)
-                                # Легкий вертикальный прижим
                                 self.vy = self.vy * 0.2
                         else:
                             vx = 0
@@ -297,6 +360,8 @@ class EnemyAILogicMixin(AICombatMixin, AIFlowMixin, AIActionProcessorMixin):
                     else:
                         overlapping_zones = []
                         for idx in range(len(self.trigger_zones)):
+                            if idx in getattr(self, "connected_seq_indices", set()):
+                                continue
                             is_in_flow = any(
                                 (step.get("is_random", False) and idx in step.get("seq_pool", [])) or 
                                 (not step.get("is_random", False) and idx == step.get("seq_idx", 0))
@@ -308,6 +373,8 @@ class EnemyAILogicMixin(AICombatMixin, AIFlowMixin, AIActionProcessorMixin):
                                 overlapping_zones.append(("sequence", idx))
                                 
                         for f_idx in range(len(self.flows)):
+                            if f_idx in getattr(self, "connected_flow_indices", set()):
+                                continue
                             if self.check_flow_zone_vertical_overlap(player.rect, f_idx):
                                 overlapping_zones.append(("flow", f_idx))
                         
@@ -371,7 +438,6 @@ class EnemyAILogicMixin(AICombatMixin, AIFlowMixin, AIActionProcessorMixin):
                 if self.movement_type == "flying":
                     self.vy = 0
 
-        # Накапливаем горизонтальное движение с остатком
         if not hasattr(self, "x_remainder"):
             self.x_remainder = 0.0
 
@@ -379,11 +445,9 @@ class EnemyAILogicMixin(AICombatMixin, AIFlowMixin, AIActionProcessorMixin):
         int_vx = int(total_vx)
         self.x_remainder = total_vx - int_vx
 
-        # Вертикальная скорость передается напрямую, как в оригинальной физике
         intended_vy = self.vy
         on_ground, self.vy, collided_x = apply_movement_and_collisions(self.rect, int_vx, self.vy, platforms)
         
-        # Сохраняем флаги коллизий на текущем кадре
         self.was_collided_x = collided_x
         self.was_collided_y = (intended_vy != 0 and self.vy == 0)
         

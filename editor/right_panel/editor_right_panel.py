@@ -83,9 +83,8 @@ class EditorRightPanelMixin(
         if game.editor_mode == "LEVEL_EDITOR":
             game.inspector_tab = "MAIN"
 
-        # В режиме редактирования ИИ теперь всегда активна вкладка GENERAL PROPERTIES (с кнопкой Launch)
-        if target_enemy_raw is not None and game.editor_mode == "ENEMY_EDITOR":
-            game.inspector_tab = "MAIN"
+        # В режиме редактирования ИИ мы не форсируем принудительно tab в "MAIN",
+        # чтобы позволить canvas корректно считывать и подсвечивать фиолетовые хитбоксы Order.
 
         clip_rect = pygame.Rect(1200, 84, 200, SCREEN_HEIGHT - 84)
         game.screen.set_clip(clip_rect)
@@ -98,9 +97,9 @@ class EditorRightPanelMixin(
             y_offset = self.draw_level_editor_properties(inst, y_offset, local_clicked, mouse_pos)
 
         # 2. Свойства шаблона врагов (вкладка GENERAL с кнопкой запуска ИИ редактора)
+        # Отрисовываем свойства MAIN безусловно, чтобы "GENERAL PROPERTIES" оставались доступны.
         elif target_enemy_raw is not None:
-            if game.inspector_tab == "MAIN":
-                y_offset = self.draw_enemy_main_tab(target_enemy_raw, y_offset, local_clicked, mouse_pos)
+            y_offset = self.draw_enemy_main_tab(target_enemy_raw, y_offset, local_clicked, mouse_pos)
 
         total_height = y_offset + game.right_panel_scroll
         game.right_panel_max_scroll = max(0, total_height - (SCREEN_HEIGHT - 30))

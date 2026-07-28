@@ -41,10 +41,6 @@ class NodeEditorStateMixin:
         self.preview_pan_start_mouse = (0, 0)
         self.preview_pan_start_val = (0.0, 0.0)
 
-        # Состояние панорамирования главного холста графа нодов
-        self.graph_canvas_panning = False
-        self.graph_pan_last_mouse = (0, 0)
-
     def find_all_presets(self):
         presets = []
         enemies_dir = "enemies"

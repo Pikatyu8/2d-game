@@ -4,8 +4,8 @@ import copy
 
 class AIFlowMixin:
     def update_flow_selection(self, player):
-        # Если идет animation атаки, движения или КД, прерываем выбор
-        if self.running_actions or self.attack_cooldown_timer > 0 or self.state == "post_action" or self.active_flow is not None:
+        # Если идет выполнение атак, движения или КД, прерываем выбор поведения
+        if self.running_actions or self.attack_cooldown_timer > 0 or self.state == "post_action" or self.active_flow is not None or getattr(self, "active_order", None) is not None:
             return
 
         if not hasattr(self, "consecutive_triggers"):
@@ -17,6 +17,10 @@ class AIFlowMixin:
 
         # 1. Сбор кандидатов из AI Flows
         for f_idx, flow in enumerate(self.flows):
+            # Пропускаем Flow, если он привязан к Order
+            if f_idx in getattr(self, "connected_flow_indices", set()):
+                continue
+
             flow.setdefault("_cooldown_timer", 0)
             if flow["_cooldown_timer"] == 0:
                 if self.check_player_in_flow_zone(player.rect, f_idx):
@@ -43,8 +47,12 @@ class AIFlowMixin:
                             "satisfied": is_satisfied
                         })
 
-        # 2. Сбор кандидатов из Sequences (исключая те, что заняты внутри Flows и их пулов)
+        # 2. Сбор кандидатов из Sequences (исключая связанные с Flows и Order)
         for seq_idx, seq in enumerate(self.sequences):
+            # Пропускаем Sequence, если она привязана к Order
+            if seq_idx in getattr(self, "connected_seq_indices", set()):
+                continue
+
             is_in_flow = any(
                 (step.get("is_random", False) and seq_idx in step.get("seq_pool", [])) or
                 (not step.get("is_random", False) and seq_idx == step.get("seq_idx", 0))
@@ -75,6 +83,34 @@ class AIFlowMixin:
                             "type": "sequence",
                             "idx": seq_idx,
                             "ref": seq,
+                            "weight": weight,
+                            "key": key,
+                            "satisfied": is_satisfied
+                        })
+
+        # 3. Сбор кандидатов из Order Nodes
+        for o_idx, order in enumerate(getattr(self, "orders", [])):
+            order.setdefault("_cooldown_timer", 0)
+            if order["_cooldown_timer"] == 0:
+                if self.check_player_in_order_zone(player.rect, o_idx):
+                    trig_zone = order.get("trigger_zone", {})
+                    req_hold = trig_zone.get("hold_time", 0)
+                    key = f"order_{o_idx}"
+                    current_hold = self.trigger_hold_timers.get(key, 0)
+                    
+                    is_satisfied = (current_hold >= req_hold)
+                    if is_satisfied:
+                        any_satisfied = True
+                        
+                    hold_factor = min(1.0, current_hold / req_hold) if req_hold > 0 else 1.0
+                    base_chance = order.get("chance", 1.0)
+                    weight = base_chance * hold_factor
+                    
+                    if weight > 0:
+                        candidates.append({
+                            "type": "order",
+                            "idx": o_idx,
+                            "ref": order,
                             "weight": weight,
                             "key": key,
                             "satisfied": is_satisfied
@@ -114,6 +150,12 @@ class AIFlowMixin:
                 if chosen["type"] == "flow":
                     self.active_flow = target
                     self.active_flow_timer = 0
+                    self.running_actions = []
+                elif chosen["type"] == "order":
+                    # Активируем пошаговое выполнение Order
+                    self.active_order = target
+                    self.active_order_timer = 0
+                    self.active_order_step_idx = 0
                     self.running_actions = []
                 else:
                     self.running_sequences.append({

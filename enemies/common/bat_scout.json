@@ -14,10 +14,10 @@
         "template": "detections.radius_view",
         "shape": {
             "template": "forms.circle",
-            "r": 130
+            "r": 119
         },
-        "offset_x": -120,
-        "offset_y": -115
+        "offset_x": -109,
+        "offset_y": -104
     },
     "projectiles": [
         {

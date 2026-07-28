@@ -16,6 +16,7 @@ class GameIOMixin:
         raw_e.setdefault("sequences", [])
         raw_e.setdefault("flows", [])
         raw_e.setdefault("projectiles", []) 
+        raw_e.setdefault("orders", [])
 
         if "attack_zones" in raw_e:
             if not raw_e["attacks"]:
@@ -78,11 +79,11 @@ class GameIOMixin:
             proj.setdefault("gravity", 0.0)
             proj.setdefault("damage", 1)
             proj.setdefault("radius", 8)
-            proj.setdefault("shoot_cooldown", 30) # Частота стрельбы по умолчанию (кулдаун в кадрах)
+            proj.setdefault("shoot_cooldown", 30)
 
         for seq in raw_e["sequences"]:
             seq.setdefault("chance", 0.5)
-            seq.setdefault("post_cooldown", 30) # Наш новый параметр восстановления по умолчанию
+            seq.setdefault("post_cooldown", 30)
             tz = seq.setdefault("trigger_zone", {})
             tz.setdefault("hold_time", 0)
             tz.setdefault("consecutive_limit", 3)
@@ -90,11 +91,24 @@ class GameIOMixin:
 
         for flow in raw_e["flows"]:
             flow.setdefault("chance", 0.5)
-            flow.setdefault("post_cooldown", 30) # Добавляем нормализацию Post CD для потоков
+            flow.setdefault("post_cooldown", 30)
             tz = flow.setdefault("trigger_zone", {})
             tz.setdefault("hold_time", 0)
             tz.setdefault("consecutive_limit", 3)
             tz.setdefault("accumulate_hold", True)
+
+        for o in raw_e["orders"]:
+            o.setdefault("chance", 1.0)
+            o.setdefault("cooldown", 120)
+            o.setdefault("post_cooldown", 30)
+            tz = o.setdefault("trigger_zone", {})
+            tz.setdefault("hold_time", 0)
+            tz.setdefault("consecutive_limit", 3)
+            tz.setdefault("accumulate_hold", True)
+            tz.setdefault("offset_x", 0)
+            tz.setdefault("offset_y", 0)
+            tz.setdefault("type", "following")
+            tz.setdefault("shape", {"template": "forms.rect", "w": 150, "h": 60})
 
         raw_flows = raw_e.setdefault("flows", [])
         for flow in raw_flows:

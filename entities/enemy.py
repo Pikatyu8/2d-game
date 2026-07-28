@@ -1,5 +1,3 @@
-# START OF FILE enemy.py
-
 # entities/enemy.py
 import pygame
 from entities.enemy_parts.enemy_collision import EnemyCollisionMixin
@@ -53,8 +51,9 @@ class Enemy(EnemyCollisionMixin, EnemySequenceMixin, EnemyAILogicMixin, EnemyRen
         self.movements = resolved_data.get("movements", [])
         self.sequences = resolved_data.get("sequences", [])
         self.flows = resolved_data.get("flows", [])
-        self.projectiles = resolved_data.get("projectiles", []) # Локальный реестр шаблонов снарядов
-        self.projectile_cooldowns = {} # Локальные таймеры кулдауна выстрелов
+        self.orders = resolved_data.get("orders", [])  # Локальный реестр цепочек порядка
+        self.projectiles = resolved_data.get("projectiles", []) 
+        self.projectile_cooldowns = {} 
 
         # Инициализация списков для AI
         self.running_sequences = []
@@ -62,6 +61,9 @@ class Enemy(EnemyCollisionMixin, EnemySequenceMixin, EnemyAILogicMixin, EnemyRen
         self.trigger_hold_timers = {}
         self.active_flow = None
         self.active_flow_timer = 0
+        self.active_order = None
+        self.active_order_timer = 0
+        self.active_order_step_idx = 0
         self.last_attack_hit_registered = False
 
         self.trigger_zones = []
@@ -75,6 +77,22 @@ class Enemy(EnemyCollisionMixin, EnemySequenceMixin, EnemyAILogicMixin, EnemyRen
 
         self.patrol_return_delay_timer = 0
         
-        # Обход препятствий летающими врагами
         self.was_collided_x = False
         self.was_collided_y = False
+
+        # Формируем кэш индексов дочерних хитбоксов для их скрытия/байпаса
+        self.connected_seq_indices = set()
+        self.connected_flow_indices = set()
+        for order in self.orders:
+            for step in order.get("steps", []):
+                for conn in step.get("connections", []):
+                    c_type = conn.get("type")
+                    c_name = conn.get("name")
+                    if c_type == "Sequence":
+                        for s_idx, seq in enumerate(self.sequences):
+                            if seq.get("name") == c_name:
+                                self.connected_seq_indices.add(s_idx)
+                    elif c_type == "Flow":
+                        for f_idx, flow in enumerate(self.flows):
+                            if flow.get("name") == c_name:
+                                self.connected_flow_indices.add(f_idx)

@@ -20,6 +20,8 @@ class NodeEditorNodesMixin:
         self.movement_theme = self.create_node_theme((45, 85, 140))    
         self.phase_theme = self.create_node_theme((75, 130, 160))     
         self.projectile_theme = self.create_node_theme((105, 55, 140))
+        self.order_theme = self.create_node_theme((80, 50, 120))
+        self.order_highlight_theme = self.create_node_theme((0, 240, 255))
 
     def create_root_node(self, properties=None):
         properties = properties or {}
@@ -55,6 +57,15 @@ class NodeEditorNodesMixin:
         self.pins_registry[p_in] = {"node_id": node_id, "type": "Behavior", "direction": "Input"}
         self.pin_to_node[p_in] = node_id
         
+        p_order = dpg.add_node_attribute(parent=node_id, attribute_type=dpg.mvNode_Attr_Output)
+        group_id = dpg.add_group(horizontal=True, tag=f"order_group_{node_id}", parent=p_order)
+        dpg.add_text("order: ", parent=group_id)
+        
+        node.output_pins[p_order] = PinData(p_order, "Output", "Order Connection", "Order")
+        self.pins_registry[p_order] = {"node_id": node_id, "type": "Order", "direction": "Output"}
+        self.pin_to_node[p_order] = node_id
+        properties["order_pin"] = p_order
+
         self.nodes_data[node_id] = node
         dpg.bind_item_theme(node_id, self.flow_theme)
         
@@ -77,6 +88,15 @@ class NodeEditorNodesMixin:
         self.pins_registry[p_in] = {"node_id": node_id, "type": "Exec", "direction": "Input"}
         self.pin_to_node[p_in] = node_id
         
+        p_order = dpg.add_node_attribute(parent=node_id, attribute_type=dpg.mvNode_Attr_Output)
+        group_id = dpg.add_group(horizontal=True, tag=f"order_group_{node_id}", parent=p_order)
+        dpg.add_text("order: ", parent=group_id)
+        
+        node.output_pins[p_order] = PinData(p_order, "Output", "Order Connection", "Order")
+        self.pins_registry[p_order] = {"node_id": node_id, "type": "Order", "direction": "Output"}
+        self.pin_to_node[p_order] = node_id
+        properties["order_pin"] = p_order
+
         self.nodes_data[node_id] = node
         dpg.bind_item_theme(node_id, self.sequence_theme)
         
@@ -185,9 +205,9 @@ class NodeEditorNodesMixin:
         pin_label = f"Step {step_index}"
         delay_val = step_data.get("delay", 0) if step_data else 0
         
-        with dpg.node_attribute(parent=node_id, attribute_type=dpg.mvNode_Attr_Output) as pin_id:
-            dpg.add_text(pin_label)
-            delay_input = dpg.add_input_int(width=85, label="Delay", default_value=delay_val, callback=self.update_step_delay, user_data=(node_id, pin_id))
+        pin_id = dpg.add_node_attribute(parent=node_id, attribute_type=dpg.mvNode_Attr_Output)
+        dpg.add_text(pin_label, parent=pin_id)
+        delay_input = dpg.add_input_int(width=85, label="Delay", default_value=delay_val, callback=self.update_step_delay, user_data=(node_id, pin_id), parent=pin_id)
             
         pin_info = PinData(pin_id, "Output", pin_label, "Exec", {"delay": delay_val, "delay_input": delay_input, "index": step_index})
         node.output_pins[pin_id] = pin_info
@@ -205,10 +225,10 @@ class NodeEditorNodesMixin:
         delay_val = step_data.get("delay", 0) if step_data else 0
         is_random = step_data.get("is_random", False) if step_data else False
         
-        with dpg.node_attribute(parent=node_id, attribute_type=dpg.mvNode_Attr_Output) as pin_id:
-            dpg.add_text(pin_label)
-            delay_input = dpg.add_input_int(width=85, label="Delay", default_value=delay_val, callback=self.update_flow_step_delay, user_data=(node_id, pin_id))
-            random_chk = dpg.add_checkbox(label="Random Pool", default_value=is_random, callback=self.update_flow_step_random, user_data=(node_id, pin_id))
+        pin_id = dpg.add_node_attribute(parent=node_id, attribute_type=dpg.mvNode_Attr_Output)
+        dpg.add_text(pin_label, parent=pin_id)
+        delay_input = dpg.add_input_int(width=85, label="Delay", default_value=delay_val, callback=self.update_flow_step_delay, user_data=(node_id, pin_id), parent=pin_id)
+        random_chk = dpg.add_checkbox(label="Random Pool", default_value=is_random, callback=self.update_flow_step_random, user_data=(node_id, pin_id), parent=pin_id)
             
         pin_info = PinData(pin_id, "Output", pin_label, "Exec", {
             "delay": delay_val,
@@ -221,3 +241,60 @@ class NodeEditorNodesMixin:
         self.pins_registry[pin_id] = {"node_id": node_id, "type": "Exec", "direction": "Output"}
         self.pin_to_node[pin_id] = node_id
         steps_list.append(pin_id)
+
+    def create_order_node(self, properties=None):
+        properties = properties or {}
+        properties.setdefault("steps_pins", [])
+        properties.setdefault("name", f"Order {len(self.nodes_data)}")
+        
+        node_id = dpg.add_node(label=f"seq/flow order: {properties['name']}", parent="editor_tag")
+        node = NodeData(node_id, "Order", f"seq/flow order: {properties['name']}", properties)
+        
+        p_static = dpg.add_node_attribute(parent=node_id, attribute_type=dpg.mvNode_Attr_Static)
+        group_id = dpg.add_group(horizontal=True, parent=p_static)
+        dpg.add_button(label="+", width=30, callback=self._on_add_order_step_click, user_data=node_id, parent=group_id)
+        dpg.add_button(label="-", width=30, callback=self._on_remove_order_step_click, user_data=node_id, parent=group_id)
+        dpg.add_text("Steps Control", parent=group_id)
+
+        self.nodes_data[node_id] = node
+        dpg.bind_item_theme(node_id, self.order_theme)
+        return node_id
+
+    def add_order_step(self, node_id):
+        node = self.nodes_data[node_id]
+        steps_list = node.properties.setdefault("steps_pins", [])
+        step_index = len(steps_list) + 1  # 1-based index
+        
+        pin_label = f"Step {step_index}"
+        
+        pin_id = dpg.add_node_attribute(parent=node_id, attribute_type=dpg.mvNode_Attr_Input)
+        dpg.add_text(pin_label, parent=pin_id)
+            
+        pin_info = PinData(pin_id, "Input", pin_label, "Order", {"index": step_index})
+        node.input_pins[pin_id] = pin_info
+        self.pins_registry[pin_id] = {"node_id": node_id, "type": "Order", "direction": "Input"}
+        self.pin_to_node[pin_id] = node_id
+        steps_list.append(pin_id)
+
+    def _on_add_order_step_click(self, sender, app_data, user_data):
+        self.add_order_step(user_data)
+        self.rebuild_all_order_buttons()
+
+    def _on_remove_order_step_click(self, sender, app_data, user_data):
+        node = self.nodes_data.get(user_data)
+        if node and node.properties.get("steps_pins"):
+            pin_id = node.properties["steps_pins"].pop()
+            for lid, (p_out, p_in) in list(self.links_data.items()):
+                if p_in == pin_id or p_out == pin_id:
+                    if dpg.does_item_exist(lid):
+                        dpg.delete_item(lid)
+                    self.links_data.pop(lid, None)
+            
+            if dpg.does_item_exist(pin_id):
+                dpg.delete_item(pin_id)
+                
+            self.pins_registry.pop(pin_id, None)
+            self.pin_to_node.pop(pin_id, None)
+            node.input_pins.pop(pin_id, None)
+            
+            self.rebuild_all_order_buttons()

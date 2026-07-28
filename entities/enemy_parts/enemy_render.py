@@ -402,9 +402,12 @@ class EnemyRenderMixin:
                     sr = r * zoom
                     pygame.draw.circle(surface, color, (int(scx), int(scy)), int(sr), 1)
 
-            # Рендеринг оранжевых триггерных зон последовательностей ключевых кадров
+            # Рендеринг оранжевых триггерных зон последовательностей
             for z_idx, zone in enumerate(self.trigger_zones):
-                # Активной зоной считается только та, что редактируется на вкладке K-FRAMES
+                # Скрываем триггер-бокс, если он привязан к Order
+                if z_idx in getattr(self, "connected_seq_indices", set()):
+                    continue
+                
                 is_active_trigger_edit = (inspector_tab == "K-FRAMES" and editing_trigger_idx == z_idx)
                 
                 is_in_flow = any(
@@ -413,7 +416,6 @@ class EnemyRenderMixin:
                     for flow in self.flows 
                     for step in flow.get("steps", []))
                 
-                # Исключаем из отрисовки связанные с flow последовательности, ТОЛЬКО если они не выбраны для редактирования
                 if is_in_flow and not is_active_trigger_edit:
                     continue
                 
@@ -436,7 +438,7 @@ class EnemyRenderMixin:
                         base_color = (int(255 * (1.0 - progress)), int(60 + 180 * progress), int(255 * progress))
                     
                     if not is_active_trigger_edit:
-                        draw_color = (*base_color, 64)  # Накладываем полупрозрачность в неактивном режиме
+                        draw_color = (*base_color, 64)  
                         target_draw_surface = local_surf
                     else:
                         draw_color = base_color
@@ -480,17 +482,20 @@ class EnemyRenderMixin:
 
             # Рендеринг голубых триггерных зон потоков поведения (Flows)
             for f_idx, flow in enumerate(self.flows):
+                # Скрываем триггер-бокс, если он привязан к Order
+                if f_idx in getattr(self, "connected_flow_indices", set()):
+                    continue
+                    
                 flow_zone_data = self.get_attack_zone_shape_for_flow_zone(f_idx)
                 if flow_zone_data:
                     stype, val = flow_zone_data
                     is_alert = self.check_player_in_flow_zone(player_rect, f_idx)
                     base_color = (0, 240, 255) if is_alert else (0, 150, 200)
                     
-                    # Поток активен, только если он детально редактируется во вкладке FLOW
                     is_active_flow_edit = (inspector_tab == "DETAILED_FLOW" and game is not None and game.selected_flow_idx == f_idx)
                     
                     if not is_active_flow_edit:
-                        draw_color = (*base_color, 64)  # Накладываем полупрозрачность в неактивном режиме
+                        draw_color = (*base_color, 64)  
                         target_draw_surface = local_surf
                     else:
                         draw_color = base_color
@@ -538,6 +543,67 @@ class EnemyRenderMixin:
                     font_flow = game.get_cached_font(font_size) if game else pygame.font.SysFont(None, font_size)
                     flow_lbl = font_flow.render(f"Flow: {flow.get('name', 'Combo')} [{current_hold}/{req_hold} (Atk: {consec}/{limit})]", True, base_color)
                     surface.blit(flow_lbl, (draw_x + 5 * zoom, draw_y + 5 * zoom))
+
+            # Рендеринг фиолетовых триггерных зон цепочек порядка (Orders)
+            editing_order_idx = game.selected_order_idx if game else None
+            for o_idx, order in enumerate(getattr(self, "orders", [])):
+                order_zone_data = self.get_attack_zone_shape_for_order_zone(o_idx)
+                if order_zone_data:
+                    stype, val = order_zone_data
+                    is_alert = self.check_player_in_order_zone(player_rect, o_idx)
+                    base_color = (180, 50, 255) if is_alert else (120, 30, 200)
+                    
+                    is_active_order_edit = (inspector_tab == "DETAILED_ORDER" and editing_order_idx == o_idx)
+                    
+                    if not is_active_order_edit:
+                        draw_color = (*base_color, 64)
+                        target_draw_surface = local_surf
+                    else:
+                        draw_color = base_color
+                        target_draw_surface = surface
+                        
+                    draw_x, draw_y = 0, 0
+                    if stype == "rectangle":
+                        rect, angle = val
+                        asx = CANVAS_OFFSET_X + (rect.x - camera_x) * zoom
+                        asy = (rect.y - camera_y) * zoom
+                        asw = rect.width * zoom
+                        ash = rect.height * zoom
+                        if angle == 0:
+                            pygame.draw.rect(target_draw_surface, draw_color, (asx, asy, asw, ash), 1)
+                            draw_x, draw_y = asx, asy
+                        else:
+                            cx = asx + asw / 2
+                            cy = asy + ash / 2
+                            rad = math.radians(-angle)
+                            cos_a, sin_a = math.cos(rad), math.sin(rad)
+                            dx, dy = asw / 2, ash / 2
+                            corners = []
+                            for px, py in [(-dx, -dy), (dx, -dy), (dx, dy), (-dx, dy)]:
+                                rx = px * cos_a - py * sin_a + cx
+                                ry = px * sin_a + py * cos_a + cy
+                                corners.append((int(rx), int(ry)))
+                            pygame.draw.polygon(target_draw_surface, draw_color, corners, 1)
+                            draw_x, draw_y = int(cx - asw / 2), int(cy - ash / 2)
+                    elif stype == "circle":
+                        cx, cy, r = val
+                        scx = CANVAS_OFFSET_X + (cx - camera_x) * zoom
+                        scy = (cy - camera_y) * zoom
+                        sr = r * zoom
+                        pygame.draw.circle(target_draw_surface, draw_color, (int(scx), int(scy)), int(sr), 1)
+                        draw_x, draw_y = int(scx - sr), int(scy - sr)
+
+                    trig_z = order.get("trigger_zone", {})
+                    req_hold = trig_z.get("hold_time", 0)
+                    key = f"order_{o_idx}"
+                    current_hold = getattr(self, "trigger_hold_timers", {}).get(key, 0)
+                    consec = getattr(self, "consecutive_triggers", {}).get(key, 0)
+                    limit = trig_z.get("consecutive_limit", 3)
+
+                    font_size = max(8, int(11 * zoom))
+                    font_order = game.get_cached_font(font_size) if game else pygame.font.SysFont(None, font_size)
+                    order_lbl = font_order.render(f"Order: {order.get('name', 'Seq')} [{current_hold}/{req_hold} (Atk: {consec}/{limit})]", True, base_color)
+                    surface.blit(order_lbl, (draw_x + 5 * zoom, draw_y + 5 * zoom))
 
             # Рендеринг хитбоксов урона атак
             for a_idx, att in enumerate(self.attacks):

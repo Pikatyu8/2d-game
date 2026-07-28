@@ -64,6 +64,16 @@ class GameHitboxMixin:
                 if parent_dict:
                     shape_dict = parent_dict.get("shape")
                     shape_data = enemy.get_attack_zone_shape_for_flow_zone(self.selected_flow_idx)
+        elif self.inspector_tab == "DETAILED_ORDER":
+            orders = target_enemy_raw.get("orders", [])
+            if orders and self.selected_order_idx < len(orders):
+                curr_order = orders[self.selected_order_idx]
+                parent_dict = curr_order.get("trigger_zone")
+                if self.selected_order_idx < len(enemy.orders):
+                    resolved_parent_dict = enemy.orders[self.selected_order_idx].get("trigger_zone")
+                if parent_dict:
+                    shape_dict = parent_dict.get("shape")
+                    shape_data = enemy.get_attack_zone_shape_for_order_zone(self.selected_order_idx)
                     
         if not shape_dict or not parent_dict or not shape_data:
             return None
@@ -158,9 +168,9 @@ class GameHitboxMixin:
             cx = CANVAS_OFFSET_X + (rect.centerx - camera_x) * zoom
             cy = (rect.centery - camera_y) * zoom
             sw = rect.width * zoom
-            sh = rect.height * zoom
+            ash_val = rect.height * zoom
             
-            local_rect = pygame.Rect(cx - sw/2, cy - sh/2, sw, sh)
+            local_rect = pygame.Rect(cx - sw/2, cy - ash_val/2, sw, ash_val)
             local_mx, local_my = rotate_point((mx, my), (cx, cy), -angle)
             
             if local_rect.collidepoint(local_mx, local_my):

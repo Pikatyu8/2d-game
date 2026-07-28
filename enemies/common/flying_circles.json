@@ -46,24 +46,6 @@
                     "shape": {
                         "template": "forms.circle",
                         "type": "circle",
-                        "r": 130
-                    },
-                    "offset_x": -146,
-                    "offset_y": -115,
-                    "angle": 0,
-                    "delay": 0,
-                    "duration": 10,
-                    "damage": 1,
-                    "kb_angle_hit": -45,
-                    "kb_force_hit": 18.0,
-                    "kb_angle_parry": -45,
-                    "kb_force_parry": 9.0,
-                    "sprite_dir": "forward"
-                },
-                {
-                    "shape": {
-                        "template": "forms.circle",
-                        "type": "circle",
                         "r": 125
                     },
                     "offset_x": -141,
@@ -138,5 +120,77 @@
             ]
         }
     ],
-    "flows": []
+    "flows": [],
+    "orders": [
+        {
+            "name": "Order 1",
+            "pos": [
+                1108,
+                61
+            ],
+            "chance": 1.0,
+            "cooldown": 60,
+            "post_cooldown": 30,
+            "trigger_zone": {
+                "shape": {
+                    "template": "forms.circle",
+                    "type": "circle",
+                    "r": 117
+                },
+                "offset_x": -132,
+                "offset_y": -102,
+                "type": "following",
+                "hold_time": 0,
+                "consecutive_limit": 3,
+                "accumulate_hold": true
+            },
+            "steps": [
+                {
+                    "index": 1,
+                    "connections": [
+                        {
+                            "type": "Sequence",
+                            "name": "Seq 1"
+                        }
+                    ]
+                },
+                {
+                    "index": 2,
+                    "connections": [
+                        {
+                            "type": "Sequence",
+                            "name": "Seq 2"
+                        }
+                    ]
+                },
+                {
+                    "index": 3,
+                    "connections": [
+                        {
+                            "type": "Sequence",
+                            "name": "Seq 2"
+                        }
+                    ]
+                },
+                {
+                    "index": 4,
+                    "connections": [
+                        {
+                            "type": "Sequence",
+                            "name": "Seq 2"
+                        }
+                    ]
+                },
+                {
+                    "index": 5,
+                    "connections": [
+                        {
+                            "type": "Sequence",
+                            "name": "Seq 1"
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
 }

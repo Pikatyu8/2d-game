@@ -65,6 +65,7 @@ class Game(GameIOMixin, GameEditorLogicMixin, GameHitboxMixin, GameUtilsMixin):
         self.selected_box_idx = 0       
         self.selected_move_edit_idx = 0
         self.selected_projectile_edit_idx = 0  
+        self.selected_order_idx = 0
         
         self.selected_seq_idx = 0
         self.selected_step_idx = 0
@@ -126,7 +127,6 @@ class Game(GameIOMixin, GameEditorLogicMixin, GameHitboxMixin, GameUtilsMixin):
             right_clicked_this_frame = False
             mouse_pos = pygame.mouse.get_pos()
 
-            # Проверка внешних изменений пресета (Live-Reload)
             if self.editor_mode in ("LEVEL_EDITOR", "ENEMY_EDITOR") and getattr(self, "selected_preset_name", None):
                 filepath = self.preset_filepaths.get(self.selected_preset_name)
                 if filepath and os.path.exists(filepath):
@@ -141,7 +141,6 @@ class Game(GameIOMixin, GameEditorLogicMixin, GameHitboxMixin, GameUtilsMixin):
                     except Exception:
                         pass
                 
-            # Проверка файла синхронизации выбора (вынесена на верхний уровень)
             sel_path = ".editor_selection.json"
             if os.path.exists(sel_path):
                 try:
@@ -192,11 +191,13 @@ class Game(GameIOMixin, GameEditorLogicMixin, GameHitboxMixin, GameUtilsMixin):
                                 self.selected_seq_idx = s_info["seq_idx"]
                             if "flow_idx" in s_info:
                                 self.selected_flow_idx = s_info["flow_idx"]
+                            if "order_idx" in s_info:
+                                self.selected_order_idx = s_info["order_idx"]
                                 
                             self.dragging_hitbox = False
                             self.hitbox_drag_mode = None
                             
-                            print(f"[Selection Sync Log] Synchronized values: attack_idx={self.selected_attack_edit_idx}, box_idx={self.selected_box_idx}, seq_idx={self.selected_seq_idx}, flow_idx={getattr(self, 'selected_flow_idx', None)}")
+                            print(f"[Selection Sync Log] Synchronized values: attack_idx={self.selected_attack_edit_idx}, box_idx={self.selected_box_idx}, seq_idx={self.selected_seq_idx}, flow_idx={getattr(self, 'selected_flow_idx', None)}, order_idx={getattr(self, 'selected_order_idx', 0)}")
                         else:
                             print(f"[Selection Sync Warning] Preset '{p_name}' not found in available presets: {list(self.presets.keys())}")
                 except Exception as e:
