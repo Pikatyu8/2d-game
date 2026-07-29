@@ -2,9 +2,23 @@
     "hp": 7,
     "body": {
         "template": "forms.rect",
+        "type": "rectangle",
         "w": 30,
         "h": 30
     },
+    "body_shapes": [
+        {
+            "shape": {
+                "template": "forms.rect",
+                "type": "rectangle",
+                "w": 30,
+                "h": 30
+            },
+            "offset_x": 0,
+            "offset_y": 0,
+            "angle": 0
+        }
+    ],
     "movement_config": {
         "type_move": "flying",
         "speed": 2.4,
@@ -13,7 +27,7 @@
         "patrol_on_platform": false
     },
     "detection": {
-        "template": "detections.radius_view",
+        "template": "detections.front_view",
         "shape": {
             "template": "forms.circle",
             "type": "circle",
@@ -21,8 +35,35 @@
         },
         "offset_x": -210,
         "offset_y": -211,
-        "angle": 0
+        "type": "stationary"
     },
+    "detection_shapes": [
+        {
+            "shape": {
+                "template": "forms.circle",
+                "type": "circle",
+                "r": 225
+            },
+            "offset_x": -210,
+            "offset_y": -211,
+            "angle": 0,
+            "type": "stationary"
+        }
+    ],
+    "stop_shapes": [
+        {
+            "shape": {
+                "template": "forms.rect",
+                "type": "rectangle",
+                "w": 120,
+                "h": 70
+            },
+            "offset_x": -45,
+            "offset_y": -20,
+            "angle": 0,
+            "type": "stationary"
+        }
+    ],
     "projectiles": [
         {
             "name": "Proj Template 1",
@@ -33,7 +74,19 @@
             "radius": 8,
             "aim_at_player": true,
             "homing": 0.1,
-            "shoot_cooldown": 0
+            "shoot_cooldown": 0,
+            "shapes": [
+                {
+                    "shape": {
+                        "template": "forms.circle",
+                        "type": "circle",
+                        "r": 8
+                    },
+                    "offset_x": 0,
+                    "offset_y": 0,
+                    "angle": 0
+                }
+            ]
         }
     ],
     "attacks": [
@@ -42,6 +95,24 @@
             "cooldown": 40,
             "windup": 30,
             "shapes": [
+                {
+                    "shape": {
+                        "template": "forms.circle",
+                        "type": "circle",
+                        "r": 130
+                    },
+                    "offset_x": -146,
+                    "offset_y": -115,
+                    "angle": 0,
+                    "delay": 0,
+                    "duration": 10,
+                    "damage": 1,
+                    "kb_angle_hit": -45,
+                    "kb_force_hit": 18.0,
+                    "kb_angle_parry": -45,
+                    "kb_force_parry": 9.0,
+                    "sprite_dir": "forward"
+                },
                 {
                     "shape": {
                         "template": "forms.circle",
@@ -74,15 +145,28 @@
                 "shape": {
                     "template": "forms.circle",
                     "type": "circle",
-                    "r": 87
+                    "r": 85
                 },
-                "offset_x": -104,
-                "offset_y": -73,
+                "offset_x": -101,
+                "offset_y": -70,
                 "type": "following",
                 "hold_time": 0,
                 "consecutive_limit": 3,
                 "accumulate_hold": true
             },
+            "trigger_shapes": [
+                {
+                    "shape": {
+                        "template": "forms.circle",
+                        "type": "circle",
+                        "r": 85
+                    },
+                    "offset_x": -101,
+                    "offset_y": -70,
+                    "angle": 0,
+                    "type": "following"
+                }
+            ],
             "steps": [
                 {
                     "type": "attack",
@@ -104,13 +188,27 @@
                     "w": 290,
                     "h": 190
                 },
-                "offset_x": -160,
-                "offset_y": -80,
+                "offset_x": -158,
+                "offset_y": -78,
                 "type": "following",
                 "hold_time": 40,
                 "consecutive_limit": 3,
                 "accumulate_hold": true
             },
+            "trigger_shapes": [
+                {
+                    "shape": {
+                        "template": "forms.rect",
+                        "type": "rectangle",
+                        "w": 290,
+                        "h": 190
+                    },
+                    "offset_x": -158,
+                    "offset_y": -78,
+                    "angle": 0,
+                    "type": "following"
+                }
+            ],
             "steps": [
                 {
                     "type": "projectile",
@@ -121,76 +219,5 @@
         }
     ],
     "flows": [],
-    "orders": [
-        {
-            "name": "Order 1",
-            "pos": [
-                1108,
-                61
-            ],
-            "chance": 1.0,
-            "cooldown": 60,
-            "post_cooldown": 30,
-            "trigger_zone": {
-                "shape": {
-                    "template": "forms.circle",
-                    "type": "circle",
-                    "r": 117
-                },
-                "offset_x": -132,
-                "offset_y": -102,
-                "type": "following",
-                "hold_time": 0,
-                "consecutive_limit": 3,
-                "accumulate_hold": true
-            },
-            "steps": [
-                {
-                    "index": 1,
-                    "connections": [
-                        {
-                            "type": "Sequence",
-                            "name": "Seq 1"
-                        }
-                    ]
-                },
-                {
-                    "index": 2,
-                    "connections": [
-                        {
-                            "type": "Sequence",
-                            "name": "Seq 2"
-                        }
-                    ]
-                },
-                {
-                    "index": 3,
-                    "connections": [
-                        {
-                            "type": "Sequence",
-                            "name": "Seq 2"
-                        }
-                    ]
-                },
-                {
-                    "index": 4,
-                    "connections": [
-                        {
-                            "type": "Sequence",
-                            "name": "Seq 2"
-                        }
-                    ]
-                },
-                {
-                    "index": 5,
-                    "connections": [
-                        {
-                            "type": "Sequence",
-                            "name": "Seq 1"
-                        }
-                    ]
-                }
-            ]
-        }
-    ]
+    "orders": []
 }

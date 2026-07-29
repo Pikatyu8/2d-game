@@ -9,7 +9,7 @@ class EnemyRenderMixin:
         if not self._attack_sprite_loaded:
             self._attack_sprite_loaded = True
             os.makedirs("assets", exist_ok=True)
-            
+
             sprite_path = os.path.join("assets", "attack_base.png")
             if os.path.exists(sprite_path):
                 try:
@@ -25,7 +25,7 @@ class EnemyRenderMixin:
                     self.attack_sprite = temp_surf
                 except Exception as e:
                     print(f"Error generating procedural attack_base: {e}")
-                    
+
             circle_path = os.path.join("assets", "attack_base_circle.png")
             if os.path.exists(circle_path):
                 try:
@@ -44,17 +44,49 @@ class EnemyRenderMixin:
                     print(f"Error generating procedural attack_base_circle: {e}")
 
     def draw(self, surface, show_debug, player_rect, camera_x=0, camera_y=0, zoom=1.0, editing_trigger_idx=None, editing_attack_idx=None, editing_box_idx=None, inspector_tab=None, selected_move_idx=None, alpha_surf=None, game=None):
+        # 1. Отрисовка всех хитбоксов тела противника (Body Shapes)
+        body_shapes = self.get_body_shapes()
+        for b_idx, (stype, val) in enumerate(body_shapes):
+            if stype == "rectangle":
+                rect, angle = val
+                asx = CANVAS_OFFSET_X + (rect.x - camera_x) * zoom
+                asy = (rect.y - camera_y) * zoom
+                asw = max(1.0, rect.width * zoom)
+                ash = max(1.0, rect.height * zoom)
+
+                # Главное тело или дочерний хитбокс
+                draw_color = ENEMY_BODY_COLOR if b_idx == 0 else (ENEMY_BODY_COLOR[0]-20, ENEMY_BODY_COLOR[1]-20, ENEMY_BODY_COLOR[2]-20)
+
+                if angle == 0:
+                    pygame.draw.rect(surface, draw_color, (asx, asy, asw, ash))
+                else:
+                    cx = asx + asw / 2
+                    cy = asy + ash / 2
+                    rad = math.radians(-angle)
+                    cos_a, sin_a = math.cos(rad), math.sin(rad)
+                    dx, dy = asw / 2, ash / 2
+                    corners = []
+                    for px, py in [(-dx, -dy), (dx, -dy), (dx, dy), (-dx, dy)]:
+                        rx = px * cos_a - py * sin_a + cx
+                        ry = px * sin_a + py * cos_a + cy
+                        corners.append((int(rx), int(ry)))
+                    pygame.draw.polygon(surface, draw_color, corners)
+            elif stype == "circle":
+                cx, cy, r = val
+                scx = CANVAS_OFFSET_X + (cx - camera_x) * zoom
+                scy = (cy - camera_y) * zoom
+                sr = max(1.0, r * zoom)
+                pygame.draw.circle(surface, ENEMY_BODY_COLOR, (int(scx), int(scy)), int(sr))
+
+        # Отрисовка головы врага на базовом хитбоксе
         sx = CANVAS_OFFSET_X + (self.rect.x - camera_x) * zoom
         sy = (self.rect.y - camera_y) * zoom
         sw = max(1.0, self.rect.width * zoom)
         sh = max(1.0, self.rect.height * zoom)
         draw_rect = pygame.Rect(sx, sy, sw, sh)
-        
-        pygame.draw.rect(surface, ENEMY_BODY_COLOR, draw_rect)
-        
+
         head_h = max(2, int(sh * 0.25))
         head_rect = pygame.Rect(draw_rect.x, draw_rect.y, draw_rect.width, head_h)
-        
         head_center_x = draw_rect.centerx
         head_center_y = draw_rect.y + head_h // 2
 
@@ -95,13 +127,13 @@ class EnemyRenderMixin:
                 head_color = ENEMY_HEAD_COLOR
         else:
             head_color = ENEMY_HEAD_COLOR
-            
+
         pygame.draw.rect(surface, head_color, head_rect)
-        
+
         eye_w = max(1.0, 4 * zoom)
         eye_x = draw_rect.right - 6 * zoom if self.direction == 1 else draw_rect.left + 2 * zoom
         pygame.draw.rect(surface, (255, 255, 255), (eye_x, draw_rect.y + 6 * zoom, eye_w, eye_w))
-        
+
         if self.hp > 0:
             hp_w = (sw / 5) * self.hp
             hp_draw_w = min(sw, hp_w)
@@ -124,7 +156,7 @@ class EnemyRenderMixin:
             warn_color = get_telegraph_color(self.active_execution_color, progress)
             outer_r = int((22 * (1.0 - progress) + 8) * zoom)
             pygame.draw.circle(surface, warn_color, (int(head_center_x), int(head_center_y)), outer_r, max(1, int(2 * zoom)))
-            
+
             if int(getattr(self, "windup_phase", 0.0)) % 2 == 0:
                 font_warning = game.get_cached_font(20, bold=True) if game else pygame.font.SysFont(None, 20, bold=True)
                 warn_lbl = font_warning.render("!", True, warn_color)
@@ -134,10 +166,10 @@ class EnemyRenderMixin:
         elif self.is_swinging:
             curr_att = self.attacks[self.active_attack_idx]
             shapes = curr_att["shapes"]
-            
+
             upcoming_shape = None
             min_time_to_trigger = 999
-            
+
             for s_idx, s_data in enumerate(shapes):
                 delay = s_data.get("delay", 0)
                 time_to_trigger = delay - self.attack_timeline_timer
@@ -145,13 +177,13 @@ class EnemyRenderMixin:
                     if time_to_trigger < min_time_to_trigger:
                         min_time_to_trigger = time_to_trigger
                         upcoming_shape = s_data
-                        
+
             if upcoming_shape is not None:
                 progress = (15 - min_time_to_trigger) / 15.0
                 warn_color = get_telegraph_color(self.active_execution_color, progress)
                 outer_r = int((22 * (1.0 - progress) + 8) * zoom)
                 pygame.draw.circle(surface, warn_color, (int(head_center_x), int(head_center_y)), outer_r, max(1, int(2 * zoom)))
-                
+
                 blink_phase = self.attack_timeline_timer * 0.25
                 if int(blink_phase) % 2 == 0:
                     font_warning = game.get_cached_font(20, bold=True) if game else pygame.font.SysFont(None, 20, bold=True)
@@ -162,7 +194,7 @@ class EnemyRenderMixin:
             for s_idx, s_data in enumerate(shapes):
                 delay = s_data.get("delay", 0)
                 duration = s_data.get("duration", 10)
-                
+
                 if delay <= self.attack_timeline_timer <= (delay + duration):
                     vis_box = s_data.get("visual_box")
                     if vis_box:
@@ -176,7 +208,7 @@ class EnemyRenderMixin:
                             else:
                                 v_cx = self.rect.right + v_ox + v_r
                             v_cy = self.rect.y + v_oy + v_r
-                            
+
                             asx = CANVAS_OFFSET_X + (v_cx - v_r - camera_x) * zoom
                             asy = (v_cy - v_r - camera_y) * zoom
                             asw = v_r * 2 * zoom
@@ -192,7 +224,7 @@ class EnemyRenderMixin:
                             else:
                                 v_abs_x = self.rect.right + v_ox
                             v_abs_y = self.rect.y + v_oy
-                            
+
                             asx = CANVAS_OFFSET_X + (v_abs_x - camera_x) * zoom
                             asy = (v_abs_y - camera_y) * zoom
                             asw = v_w * zoom
@@ -212,7 +244,7 @@ class EnemyRenderMixin:
                             else:
                                 v_abs_x = self.rect.right + ox
                             v_abs_y = self.rect.y + oy
-                            
+
                             asx = CANVAS_OFFSET_X + (v_abs_x - camera_x) * zoom
                             asy = (v_abs_y - camera_y) * zoom
                             asw = w * zoom
@@ -227,7 +259,7 @@ class EnemyRenderMixin:
                             else:
                                 v_cx = self.rect.right + ox + r
                             v_cy = self.rect.y + oy + r
-                            
+
                             asx = CANVAS_OFFSET_X + (v_cx - r - camera_x) * zoom
                             asy = (v_cy - r - camera_y) * zoom
                             asw = r * 2 * zoom
@@ -259,7 +291,7 @@ class EnemyRenderMixin:
                         scaled_img = pygame.transform.scale(target_sprite, (max(1, int(asw)), max(1, int(ash))))
                         if do_flip:
                             scaled_img = pygame.transform.flip(scaled_img, True, False)
-                        
+
                         rot_img = pygame.transform.rotate(scaled_img, effective_angle)
                         img_rect = rot_img.get_rect()
                         img_rect.center = (int(asx + asw / 2), int(asy + ash / 2))
@@ -280,107 +312,26 @@ class EnemyRenderMixin:
                         else:
                             pygame.draw.circle(surface, (255, 120, 120), (int(asx + asw/2), int(asy + ash/2)), int(asw/2))
 
-        for act in getattr(self, "running_actions", []):
-            if act.get("type") == "movement":
-                for p in act.get("phases", []):
-                    if p.get("direction") == "teleport":
-                        delay = p.get("delay", 0)
-                        if act.get("timeline_timer", 0) <= delay:
-                            dx = p.get("force_x", 0.0)
-                            dy = p.get("force_y", 0.0)
-                            start_cx = self.rect.centerx
-                            start_cy = self.rect.centery
-                            is_real_player = (player_rect is not None and player_rect.width > 0 and player_rect.x >= 0)
-                            if is_real_player:
-                                dir_to_player = 1 if player_rect.centerx >= start_cx else -1
-                            else:
-                                dir_to_player = self.direction
-                                
-                            target_cx = start_cx + int(dx * dir_to_player)
-                            target_cy = start_cy + int(dy)
-                            sx1 = CANVAS_OFFSET_X + (start_cx - camera_x) * zoom
-                            sy1 = (start_cy - camera_y) * zoom
-                            sx2 = CANVAS_OFFSET_X + (target_cx - camera_x) * zoom
-                            sy2 = (target_cy - camera_y) * zoom
-                            
-                            line_color = (180, 80, 255)
-                            pygame.draw.line(surface, line_color, (int(sx1), int(sy1)), (int(sx2), int(sy2)), max(1, int(2 * zoom)))
-                            pygame.draw.circle(surface, line_color, (int(sx2), int(sy2)), max(4, int(7 * zoom)))
-                            pygame.draw.circle(surface, (255, 255, 255), (int(sx2), int(sy2)), max(1, int(3 * zoom)))
-
-        if inspector_tab == "DETAILED_MOVEMENT" and selected_move_idx is not None and selected_move_idx < len(self.movements):
-            m_template = self.movements[selected_move_idx]
-            for p in m_template.get("phases", []):
-                if p.get("direction") == "teleport":
-                    dx = p.get("force_x", 0.0)
-                    dy = p.get("force_y", 0.0)
-                    start_cx = self.rect.centerx
-                    start_cy = self.rect.centery
-                    is_real_player = (player_rect is not None and player_rect.width > 0 and player_rect.x >= 0)
-                    if is_real_player:
-                        dir_to_player = 1 if player_rect.centerx >= start_cx else -1
-                    else:
-                        dir_to_player = self.direction
-                        
-                    target_cx = start_cx + int(dx * dir_to_player)
-                    target_cy = start_cy + int(dy)
-                    sx1 = CANVAS_OFFSET_X + (start_cx - camera_x) * zoom
-                    sy1 = (start_cy - camera_y) * zoom
-                    sx2 = CANVAS_OFFSET_X + (target_cx - camera_x) * zoom
-                    sy2 = (target_cy - camera_y) * zoom
-                    
-                    line_color = (255, 100, 255)
-                    pygame.draw.line(surface, line_color, (int(sx1), int(sy1)), (int(sx2), int(sy2)), max(1, int(2 * zoom)))
-                    pygame.draw.circle(surface, line_color, (int(sx2), int(sy2)), max(4, int(7 * zoom)))
-                    pygame.draw.circle(surface, (255, 255, 255), (int(sx2), int(sy2)), max(1, int(3 * zoom)))
-
+        # Отрисовка телепортационных кривых и зон удержания в дебаг-режиме
         if show_debug:
             local_surf = alpha_surf if alpha_surf is not None else pygame.Surface(surface.get_size(), pygame.SRCALPHA)
-            
+
             line_y = draw_rect.bottom
             pygame.draw.line(surface, (100, 255, 100), (CANVAS_OFFSET_X + (self.min_x - camera_x) * zoom, line_y), (CANVAS_OFFSET_X + (self.max_x - camera_x) * zoom, line_y), max(1, int(2 * zoom)))
             pygame.draw.circle(surface, (100, 255, 100), (int(CANVAS_OFFSET_X + (self.min_x - camera_x) * zoom), int(line_y)), max(1, int(4 * zoom)))
             pygame.draw.circle(surface, (100, 255, 100), (int(CANVAS_OFFSET_X + (self.max_x - camera_x) * zoom), int(line_y)), max(1, int(4 * zoom)))
-            
-            stop_dist = 0
-            is_stop_visible = False
-            
-            if inspector_tab == "MOVEMENT":
-                stop_dist = self.config.get("movement_config", {}).get("stop_dist", 60)
-                is_stop_visible = True
-            elif inspector_tab == "DETAILED_MOVEMENT" and selected_move_idx is not None and selected_move_idx < len(self.movements):
-                stop_dist = self.movements[selected_move_idx].get("stop_dist", 0)
-                is_stop_visible = True
-                
-            if is_stop_visible and stop_dist > 0:
-                scx = CANVAS_OFFSET_X + (self.rect.centerx - camera_x) * zoom
-                sz_w = max(1.0, stop_dist * 2 * zoom)
-                sz_h = max(1.0, self.rect.height * zoom)
-                sz_x = scx - sz_w / 2
-                sz_y = (self.rect.y - camera_y) * zoom
-                
-                yellow_fill = pygame.Surface((sz_w, sz_h), pygame.SRCALPHA)
-                yellow_fill.fill((255, 255, 0, 35))
-                surface.blit(yellow_fill, (sz_x, sz_y))
-                pygame.draw.rect(surface, (255, 255, 0), (sz_x, sz_y, sz_w, sz_h), 2)
-                
-                font_size = max(8, int(11 * zoom))
-                font_stop = game.get_cached_font(font_size) if game else pygame.font.SysFont(None, font_size)
-                stop_lbl = font_stop.render(f"Stop Range: {stop_dist}", True, (255, 255, 0))
-                surface.blit(stop_lbl, (sz_x + 5 * zoom, sz_y + 5 * zoom))
 
-            det_data = self.get_detection_shape()
-            if det_data:
-                stype, val = det_data
-                is_alert = self.check_player_detected(player_rect)
-                color = (255, 100, 100) if is_alert else (255, 255, 100)
+            # Отрисовка зон детекции/зрения (Detection Shapes)
+            det_shapes = self.get_detection_shapes()
+            is_alert = self.check_player_detected(player_rect)
+            color = (255, 100, 100) if is_alert else (255, 255, 100)
+            for stype, val in det_shapes:
                 if stype == "rectangle":
                     rect, angle = val
                     asx = CANVAS_OFFSET_X + (rect.x - camera_x) * zoom
                     asy = (rect.y - camera_y) * zoom
                     asw = rect.width * zoom
                     ash = rect.height * zoom
-                    
                     if angle == 0:
                         pygame.draw.rect(surface, color, (asx, asy, asw, ash), 1)
                     else:
@@ -402,48 +353,57 @@ class EnemyRenderMixin:
                     sr = r * zoom
                     pygame.draw.circle(surface, color, (int(scx), int(scy)), int(sr), 1)
 
-            # Рендеринг оранжевых триггерных зон последовательностей
-            for z_idx, zone in enumerate(self.trigger_zones):
-                # Скрываем триггер-бокс, если он привязан к Order
+            # Отрисовка зон остановки (Root -> Stopping Shapes)
+            stop_shapes = self.get_stop_shapes()
+            is_stopped = self.check_player_in_stop_zone(player_rect)
+            stop_color = (0, 255, 100) if is_stopped else (0, 200, 80)
+            for stype, val in stop_shapes:
+                if stype == "rectangle":
+                    rect, angle = val
+                    asx = CANVAS_OFFSET_X + (rect.x - camera_x) * zoom
+                    asy = (rect.y - camera_y) * zoom
+                    asw = rect.width * zoom
+                    ash = rect.height * zoom
+                    if angle == 0:
+                        pygame.draw.rect(surface, stop_color, (asx, asy, asw, ash), 1)
+                    else:
+                        cx = asx + asw / 2
+                        cy = asy + ash / 2
+                        rad = math.radians(-angle)
+                        cos_a, sin_a = math.cos(rad), math.sin(rad)
+                        dx, dy = asw / 2, ash / 2
+                        corners = []
+                        for px, py in [(-dx, -dy), (dx, -dy), (dx, dy), (-dx, dy)]:
+                            rx = px * cos_a - py * sin_a + cx
+                            ry = px * sin_a + py * cos_a + cy
+                            corners.append((int(rx), int(ry)))
+                        pygame.draw.polygon(surface, stop_color, corners, 1)
+                elif stype == "circle":
+                    cx, cy, r = val
+                    scx = CANVAS_OFFSET_X + (cx - camera_x) * zoom
+                    scy = (cy - camera_y) * zoom
+                    sr = r * zoom
+                    pygame.draw.circle(surface, stop_color, (int(scx), int(scy)), int(sr), 1)
+
+            # Отрисовка триггеров Sequences
+            for z_idx in range(len(self.sequences)):
                 if z_idx in getattr(self, "connected_seq_indices", set()):
                     continue
-                
+
                 is_active_trigger_edit = (inspector_tab == "K-FRAMES" and editing_trigger_idx == z_idx)
-                
-                is_in_flow = any(
-                    (step.get("is_random", False) and z_idx in step.get("seq_pool", [])) or 
-                    (not step.get("is_random", False) and z_idx == step.get("seq_idx", 0))
-                    for flow in self.flows 
-                    for step in flow.get("steps", []))
-                
-                if is_in_flow and not is_active_trigger_edit:
-                    continue
-                
-                atk_zone_data = self.get_attack_zone_shape_for_attack_zone(z_idx)
-                if atk_zone_data:
-                    stype, val = atk_zone_data
+
+                atk_zone_data = self.get_attack_zone_shapes_for_sequence(z_idx)
+                for stype, val in atk_zone_data:
                     is_alert = self.check_player_in_zone(player_rect, z_idx)
                     base_color = (255, 60, 0) if is_alert else (255, 150, 0)
-                    
-                    seq = self.sequences[z_idx] if z_idx < len(self.sequences) else {}
-                    req_hold = seq.get("trigger_zone", {}).get("hold_time", 0)
-                    
-                    key = f"seq_{z_idx}"
-                    current_hold = getattr(self, "trigger_hold_timers", {}).get(key, 0)
-                    consec = getattr(self, "consecutive_triggers", {}).get(key, 0)
-                    limit = zone.get("consecutive_limit", 3)
-                    
-                    if req_hold > 0 and current_hold > 0:
-                        progress = min(1.0, current_hold / req_hold)
-                        base_color = (int(255 * (1.0 - progress)), int(60 + 180 * progress), int(255 * progress))
-                    
+
                     if not is_active_trigger_edit:
-                        draw_color = (*base_color, 64)  
+                        draw_color = (*base_color, 64)
                         target_draw_surface = local_surf
                     else:
                         draw_color = base_color
                         target_draw_surface = surface
-                        
+
                     draw_x, draw_y = 0, 0
                     if stype == "rectangle":
                         rect, angle = val
@@ -475,32 +435,25 @@ class EnemyRenderMixin:
                         pygame.draw.circle(target_draw_surface, draw_color, (int(scx), int(scy)), int(sr), 1)
                         draw_x, draw_y = int(scx - sr), int(scy - sr)
 
-                    font_size = max(8, int(11 * zoom))
-                    font_hold = game.get_cached_font(font_size) if game else pygame.font.SysFont(None, font_size)
-                    hold_lbl = font_hold.render(f"Hold: {current_hold}/{req_hold} (Atk: {consec}/{limit})", True, base_color)
-                    surface.blit(hold_lbl, (draw_x + 5 * zoom, draw_y + 5 * zoom))
-
-            # Рендеринг голубых триггерных зон потоков поведения (Flows)
+            # Отрисовка триггеров Flows
             for f_idx, flow in enumerate(self.flows):
-                # Скрываем триггер-бокс, если он привязан к Order
                 if f_idx in getattr(self, "connected_flow_indices", set()):
                     continue
-                    
-                flow_zone_data = self.get_attack_zone_shape_for_flow_zone(f_idx)
-                if flow_zone_data:
-                    stype, val = flow_zone_data
+
+                flow_zone_data = self.get_attack_zone_shapes_for_flow(f_idx)
+                for stype, val in flow_zone_data:
                     is_alert = self.check_player_in_flow_zone(player_rect, f_idx)
                     base_color = (0, 240, 255) if is_alert else (0, 150, 200)
-                    
+
                     is_active_flow_edit = (inspector_tab == "DETAILED_FLOW" and game is not None and game.selected_flow_idx == f_idx)
-                    
+
                     if not is_active_flow_edit:
-                        draw_color = (*base_color, 64)  
+                        draw_color = (*base_color, 64)
                         target_draw_surface = local_surf
                     else:
                         draw_color = base_color
                         target_draw_surface = surface
-                        
+
                     draw_x, draw_y = 0, 0
                     if stype == "rectangle":
                         rect, angle = val
@@ -532,36 +485,23 @@ class EnemyRenderMixin:
                         pygame.draw.circle(target_draw_surface, draw_color, (int(scx), int(scy)), int(sr), 1)
                         draw_x, draw_y = int(scx - sr), int(scy - sr)
 
-                    trig_z = flow.get("trigger_zone", {})
-                    req_hold = trig_z.get("hold_time", 0)
-                    key = f"flow_{f_idx}"
-                    current_hold = getattr(self, "trigger_hold_timers", {}).get(key, 0)
-                    consec = getattr(self, "consecutive_triggers", {}).get(key, 0)
-                    limit = trig_z.get("consecutive_limit", 3)
-
-                    font_size = max(8, int(11 * zoom))
-                    font_flow = game.get_cached_font(font_size) if game else pygame.font.SysFont(None, font_size)
-                    flow_lbl = font_flow.render(f"Flow: {flow.get('name', 'Combo')} [{current_hold}/{req_hold} (Atk: {consec}/{limit})]", True, base_color)
-                    surface.blit(flow_lbl, (draw_x + 5 * zoom, draw_y + 5 * zoom))
-
-            # Рендеринг фиолетовых триггерных зон цепочек порядка (Orders)
+            # Отрисовка триггеров Orders
             editing_order_idx = game.selected_order_idx if game else None
             for o_idx, order in enumerate(getattr(self, "orders", [])):
-                order_zone_data = self.get_attack_zone_shape_for_order_zone(o_idx)
-                if order_zone_data:
-                    stype, val = order_zone_data
+                order_zone_data = self.get_attack_zone_shapes_for_order(o_idx)
+                for stype, val in order_zone_data:
                     is_alert = self.check_player_in_order_zone(player_rect, o_idx)
                     base_color = (180, 50, 255) if is_alert else (120, 30, 200)
-                    
+
                     is_active_order_edit = (inspector_tab == "DETAILED_ORDER" and editing_order_idx == o_idx)
-                    
+
                     if not is_active_order_edit:
                         draw_color = (*base_color, 64)
                         target_draw_surface = local_surf
                     else:
                         draw_color = base_color
                         target_draw_surface = surface
-                        
+
                     draw_x, draw_y = 0, 0
                     if stype == "rectangle":
                         rect, angle = val
@@ -593,26 +533,14 @@ class EnemyRenderMixin:
                         pygame.draw.circle(target_draw_surface, draw_color, (int(scx), int(scy)), int(sr), 1)
                         draw_x, draw_y = int(scx - sr), int(scy - sr)
 
-                    trig_z = order.get("trigger_zone", {})
-                    req_hold = trig_z.get("hold_time", 0)
-                    key = f"order_{o_idx}"
-                    current_hold = getattr(self, "trigger_hold_timers", {}).get(key, 0)
-                    consec = getattr(self, "consecutive_triggers", {}).get(key, 0)
-                    limit = trig_z.get("consecutive_limit", 3)
-
-                    font_size = max(8, int(11 * zoom))
-                    font_order = game.get_cached_font(font_size) if game else pygame.font.SysFont(None, font_size)
-                    order_lbl = font_order.render(f"Order: {order.get('name', 'Seq')} [{current_hold}/{req_hold} (Atk: {consec}/{limit})]", True, base_color)
-                    surface.blit(order_lbl, (draw_x + 5 * zoom, draw_y + 5 * zoom))
-
-            # Рендеринг хитбоксов урона атак
+            # Отрисовка хитбоксов атак
             for a_idx, att in enumerate(self.attacks):
                 shapes_data = self.get_attack_shapes_by_index(a_idx)
                 is_active_edit = (self.is_swinging and self.active_attack_idx == a_idx) or (editing_attack_idx is not None and a_idx == editing_attack_idx)
-                
+
                 for s_idx, (s_type, val) in enumerate(shapes_data):
                     is_selected_box = is_active_edit and (editing_box_idx is not None and s_idx == editing_box_idx)
-                    
+
                     if is_selected_box:
                         draw_color = (0, 240, 255)
                         thickness = 2
@@ -625,7 +553,7 @@ class EnemyRenderMixin:
                         draw_color = (255, 100, 100, 180)
                         thickness = 1
                         target_draw_surface = local_surf
-                        
+
                     if s_type == "rectangle":
                         rect, angle = val
                         asx = CANVAS_OFFSET_X + (rect.x - camera_x) * zoom
@@ -655,13 +583,13 @@ class EnemyRenderMixin:
                         sr = r * zoom
                         pygame.draw.circle(target_draw_surface, draw_color, (int(scx), int(scy)), int(sr), thickness)
                         draw_x, draw_y = int(scx - sr), int(scy - sr)
-                    
+
                     if is_active_edit:
                         font_size = max(8, int(12 * zoom))
                         font_att = game.get_cached_font(font_size) if game else pygame.font.SysFont(None, font_size)
                         delay = att["shapes"][s_idx].get("delay", 0)
                         dur = att["shapes"][s_idx].get("duration", 10)
-                        
+
                         if is_selected_box:
                             label_color = (0, 240, 255)
                             att_lbl = font_att.render(f"ACTIVE BOX #{s_idx+1} [Del:{delay} Dur:{dur}]", True, label_color)
@@ -670,33 +598,5 @@ class EnemyRenderMixin:
                             att_lbl = font_att.render(f"Box #{s_idx+1} [Del:{delay}]", True, label_color)
                         surface.blit(att_lbl, (draw_x + 3 * zoom, draw_y + 3 * zoom))
 
-                    for s_idx, s_data in enumerate(att.get("shapes", [])):
-                        vis_box = s_data.get("visual_box")
-                        if vis_box and is_active_edit:
-                            v_type = vis_box.get("type", "rectangle")
-                            v_ox = vis_box.get("offset_x", 0)
-                            v_oy = vis_box.get("offset_y", 0)
-                            
-                            if v_type == "circle":
-                                v_r = vis_box.get("r", 25)
-                                v_cx = self.rect.centerx + (v_ox * self.direction)
-                                v_cy = self.rect.centery + v_oy
-                                scx = CANVAS_OFFSET_X + (v_cx - camera_x) * zoom
-                                scy = (v_cy - camera_y) * zoom
-                                sr = v_r * zoom
-                                pygame.draw.circle(surface, (180, 100, 255), (int(scx), int(scy)), int(sr), 2)
-                            else:
-                                v_w = vis_box.get("w", 50)
-                                v_h = vis_box.get("h", 40)
-                                v_rect_cx = self.rect.centerx + (v_ox * self.direction)
-                                v_rect_cy = self.rect.centery + v_oy
-                                v_abs_x = v_rect_cx - v_w / 2
-                                v_abs_y = v_rect_cy - v_h / 2
-                                asx = CANVAS_OFFSET_X + (v_abs_x - camera_x) * zoom
-                                asy = (v_abs_y - camera_y) * zoom
-                                asw = v_w * zoom
-                                ash = v_h * zoom
-                                pygame.draw.rect(surface, (180, 100, 255), (asx, asy, asw, ash), 2)
-                            
             if alpha_surf is None:
                 surface.blit(local_surf, (0, 0))

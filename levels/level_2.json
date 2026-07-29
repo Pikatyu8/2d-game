@@ -1,0 +1,36 @@
+{
+    "player": {
+        "start_x": 100,
+        "start_y": 300,
+        "speed": 5,
+        "jump_force": 14,
+        "gravity": 0.6,
+        "attack_range": 65,
+        "attack_cooldown": 45
+    },
+    "platforms": [
+        {
+            "x": 0,
+            "y": 550,
+            "w": 1000,
+            "h": 50,
+            "color": [
+                80,
+                80,
+                80
+            ]
+        },
+        {
+            "x": 300,
+            "y": 420,
+            "w": 250,
+            "h": 20,
+            "color": [
+                100,
+                150,
+                100
+            ]
+        }
+    ],
+    "enemies": []
+}

@@ -125,24 +125,46 @@ class NodeEditor(
         dpg.create_viewport(title="AI Visual Graph Editor", width=1410, height=810)
         dpg.setup_dearpygui()
         dpg.show_viewport()
-        
+
         dpg.toggle_viewport_fullscreen()
+
+        # Автоматическая загрузка пресета, если имя передано в аргументах запуска
+        if arg_name:
+            presets = self.find_all_presets()
+            target_preset = None
+            arg_clean = arg_name.strip().strip('"\'')
+            # 1. Поиск совпадения по имени файла или пути
+            for p in presets:
+                if arg_clean.lower() in p.lower() or os.path.basename(p).lower().startswith(arg_clean.lower()):
+                    target_preset = p
+                    break
+            # 2. Поиск по нормализованному названию (замена пробелов на подчеркивания)
+            if not target_preset:
+                normalized_arg = arg_clean.lower().replace(" ", "_")
+                for p in presets:
+                    if normalized_arg in p.lower():
+                        target_preset = p
+                        break
+            
+            if target_preset:
+                dpg.set_value("preset_combo", target_preset)
+                self.load_preset_file(None, None)
 
         last_checked_selection = None
         while dpg.is_dearpygui_running():
             self.update_preview()
             self.update_timeline()
-            
+
             current_nodes_sig = len(self.nodes_data)
             current_links_sig = len(self.links_data)
-            if (not hasattr(self, "last_links_signature") or self.last_links_signature != current_links_sig or 
+            if (not hasattr(self, "last_links_signature") or self.last_links_signature != current_links_sig or
                 not hasattr(self, "last_nodes_signature") or self.last_nodes_signature != current_nodes_sig):
                 self.last_links_signature = current_links_sig
                 self.last_nodes_signature = current_nodes_sig
                 self.rebuild_all_order_buttons()
-                
+
             self.update_order_highlights()
-            
+
             if self.current_loaded_file_path and os.path.exists(self.current_loaded_file_path):
                 try:
                     mtime = os.path.getmtime(self.current_loaded_file_path)
@@ -161,12 +183,12 @@ class NodeEditor(
                 if active_sel != last_checked_selection:
                     last_checked_selection = active_sel
                     self.rebuild_inspector(active_sel)
-                    
+
                     node = self.nodes_data.get(active_sel)
                     if node:
                         print(f"[Node Editor Log] Selected node: id={node.id}, type={node.type}, label='{node.label}'")
                         selection_info = None
-                        
+
                         if node.type == "Hitbox":
                             atk_node = None
                             p_in_hitbox = list(node.input_pins.keys())[0] if node.input_pins else None
@@ -190,7 +212,7 @@ class NodeEditor(
                                                 connected_hitboxes.append(self.nodes_data[hb_node_id])
                                     connected_hitboxes.sort(key=lambda x: x.properties.get("delay", 0))
                                     hb_idx = connected_hitboxes.index(node)
-                                    
+
                                     selection_info = {
                                         "preset_name": dpg.get_value("preset_combo"),
                                         "inspector_tab": "DETAILED_ATTACK",
@@ -199,7 +221,7 @@ class NodeEditor(
                                     }
                                 except ValueError as ve:
                                     print(f"[Node Editor Error] Failed to resolve index in lists: {ve}")
-                                    
+
                         elif node.type == "Sequence":
                             sorted_sequences = sorted([n for n in self.nodes_data.values() if n.type == "Sequence"], key=lambda x: dpg.get_item_pos(x.id)[1])
                             if node in sorted_sequences:
@@ -209,7 +231,7 @@ class NodeEditor(
                                     "inspector_tab": "K-FRAMES",
                                     "seq_idx": seq_idx
                                 }
-                                
+
                         elif node.type == "Flow":
                             sorted_flows = sorted([n for n in self.nodes_data.values() if n.type == "Flow"], key=lambda x: dpg.get_item_pos(x.id)[1])
                             if node in sorted_flows:
@@ -219,7 +241,7 @@ class NodeEditor(
                                     "inspector_tab": "DETAILED_FLOW",
                                     "flow_idx": flow_idx
                                 }
-                                
+
                         elif node.type == "Root":
                             selection_info = {
                                 "preset_name": dpg.get_value("preset_combo"),
@@ -235,7 +257,7 @@ class NodeEditor(
                                     "inspector_tab": "DETAILED_ORDER",
                                     "order_idx": order_idx
                                 }
-                            
+
                         if selection_info:
                             try:
                                 with open(".editor_selection.json", "w", encoding="utf-8") as sf:
@@ -246,7 +268,6 @@ class NodeEditor(
             time.sleep(0.016)
 
         dpg.destroy_context()
-
 if __name__ == "__main__":
     editor = NodeEditor()
     editor.setup_ui()

@@ -65,8 +65,9 @@ class NodeEditorUIMixin:
         with dpg.window(label="Interactive Preview Panel", tag="preview_window", width=380, height=340, pos=[950, 150], no_close=True, no_move=True):
             with dpg.group(horizontal=True):
                 dpg.add_button(label="Reset View", callback=self.reset_preview_pan)
-                dpg.add_text("RMB: Pan | Drag to resize")
-            dpg.add_drawlist(width=360, height=270, tag="preview_drawlist")
+                dpg.add_slider_float(label="Zoom", tag="preview_zoom", default_value=0.5, min_value=0.1, max_value=2.0, width=120)
+            # drawlist инициализируется с width=-1 и height=-1 для авторасширения в окне
+            dpg.add_drawlist(width=-1, height=-1, tag="preview_drawlist")
 
     def resize_callback(self, sender, app_data):
         if not dpg.does_item_exist("main_window"):

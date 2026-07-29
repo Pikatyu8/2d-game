@@ -2524,6 +2524,28 @@ class NodeEditor(
 
         dpg.toggle_viewport_fullscreen()
 
+        # Автоматическая загрузка пресета, если имя передано в аргументах запуска
+        if arg_name:
+            presets = self.find_all_presets()
+            target_preset = None
+            arg_clean = arg_name.strip().strip('"\'')
+            # 1. Поиск совпадения по имени файла или пути
+            for p in presets:
+                if arg_clean.lower() in p.lower() or os.path.basename(p).lower().startswith(arg_clean.lower()):
+                    target_preset = p
+                    break
+            # 2. Поиск по нормализованному названию (замена пробелов на подчеркивания)
+            if not target_preset:
+                normalized_arg = arg_clean.lower().replace(" ", "_")
+                for p in presets:
+                    if normalized_arg in p.lower():
+                        target_preset = p
+                        break
+
+            if target_preset:
+                dpg.set_value("preset_combo", target_preset)
+                self.load_preset_file(None, None)
+
         last_checked_selection = None
         while dpg.is_dearpygui_running():
             self.update_preview()
@@ -2642,7 +2664,6 @@ class NodeEditor(
             time.sleep(0.016)
 
         dpg.destroy_context()
-
 if __name__ == "__main__":
     editor = NodeEditor()
     editor.setup_ui()
@@ -2655,7 +2676,6 @@ if __name__ == "__main__":
 # editor/node_editor_parts/node_editor_inspector.py
 import dearpygui.dearpygui as dpg
 
-# Вспомогательные хелперы для безопасного приведения типов перед отправкой в Dear PyGui
 def safe_int(val, default=0):
     if val is None:
         return default
@@ -2756,72 +2776,189 @@ class NodeEditorInspectorMixin:
         dpg.delete_item(app_data)
 
     def auto_arrange(self):
-        spacing_x = {
-            "Root": 50,
-            "Order": 300,
-            "Flow": 580,
-            "Sequence": 860,
-            "Attack": 1140,
-            "Movement": 1140,
-            "Projectile": 1140,
-            "Hitbox": 1420,
-            "Phase": 1420
-        }
+        parent_to_children = {}  # node_id -> list of (child_node_id, pin_out, pin_in)
+        child_to_parents = {}    # node_id -> list of (parent_node_id, pin_out, pin_in)
 
-        col_counters = {}
-        for node_id, node in self.nodes_data.items():
-            node_type = node.type
-            col_key = node_type
-            if node_type in ("Attack", "Movement", "Projectile"):
-                col_key = "Attack"
-            elif node_type in ("Hitbox", "Phase"):
-                col_key = "Hitbox"
+        for lid, (p_out, p_in) in list(self.links_data.items()):
+            parent_id = self.pin_to_node.get(p_out)
+            child_id = self.pin_to_node.get(p_in)
+            if parent_id and child_id:
+                parent_to_children.setdefault(parent_id, []).append((child_id, p_out, p_in))
+                child_to_parents.setdefault(child_id, []).append((parent_id, p_out, p_in))
 
-            col_counters[col_key] = col_counters.get(col_key, 0) + 1
+        root_node = None
+        for node in self.nodes_data.values():
+            if node.type == "Root":
+                root_node = node
+                break
 
-            col_idx = col_counters[col_key]
-            x = spacing_x.get(col_key, 50)
-            y = 50 + col_idx * 180
+        if not root_node:
+            spacing_x = {
+                "Root": 50, "Order": 300, "Flow": 580, "Sequence": 860,
+                "Attack": 1140, "Movement": 1140, "Projectile": 1140,
+                "Hitbox": 1420, "Phase": 1420
+            }
+            col_counters = {}
+            for node_id, node in self.nodes_data.items():
+                node_type = node.type
+                col_key = node_type
+                if node_type in ("Attack", "Movement", "Projectile"):
+                    col_key = "Attack"
+                elif node_type in ("Hitbox", "Phase"):
+                    col_key = "Hitbox"
 
-            if node_type == "Root":
-                y = 280
+                col_counters[col_key] = col_counters.get(col_key, 0) + 1
+                col_idx = col_counters[col_key]
+                x = spacing_x.get(col_key, 50)
+                y = 50 + col_idx * 180
+                if dpg.does_item_exist(node_id):
+                    dpg.set_item_pos(node_id, [x, y])
+            return
 
-            dpg.set_item_pos(node_id, [x, y])
+        positioned_nodes = {}
 
-    def sync_with_dpg(self):
-        dpg_nodes = dpg.get_item_children("editor_tag", slot=1) or []
-        dpg_links = dpg.get_item_children("editor_tag", slot=0) or []
+        # Базовая позиция для Root
+        root_x, root_y = 50, 320
+        positioned_nodes[root_node.id] = (root_x, root_y)
 
-        existing_nodes = set()
-        for item in dpg_nodes:
-            if dpg.get_item_type(item) == "mvAppItemType::mvNode":
-                existing_nodes.add(item)
+        # 3. Распределение хитбоксов тела, зрения и остановки преследования (Root -> Hitboxes)
+        body_pin = root_node.properties.get("body_pin")
+        det_pin = root_node.properties.get("det_pin")
+        stop_pin = root_node.properties.get("stop_pin")
 
-        existing_links = set()
-        for item in dpg_links:
-            if dpg.get_item_type(item) == "mvAppItemType::mvNodeLink":
-                existing_links.add(item)
+        body_hitboxes = []
+        det_hitboxes = []
+        stop_hitboxes = []
 
-        for nid in list(self.nodes_data.keys()):
-            if nid not in existing_nodes:
-                del self.nodes_data[nid]
+        if root_node.id in parent_to_children:
+            for child_id, p_out, p_in in parent_to_children[root_node.id]:
+                child_node = self.nodes_data.get(child_id)
+                if child_node and child_node.type == "Hitbox":
+                    if p_out == body_pin:
+                        body_hitboxes.append(child_node)
+                    elif p_out == det_pin:
+                        det_hitboxes.append(child_node)
+                    elif p_out == stop_pin:
+                        stop_hitboxes.append(child_node)
 
-        for lid in list(self.links_data.keys()):
-            if lid not in existing_links:
-                del self.links_data[lid]
+        current_y = 40
+        for hb in body_hitboxes:
+            positioned_nodes[hb.id] = (300, current_y)
+            current_y += 85
+
+        for hb in det_hitboxes:
+            positioned_nodes[hb.id] = (300, current_y)
+            current_y += 85
+
+        for hb in stop_hitboxes:
+            positioned_nodes[hb.id] = (300, current_y)
+            current_y += 85
+
+        # 4. Размещение нод Order ниже хитбоксов Root
+        order_nodes = [n for n in self.nodes_data.values() if n.type == "Order"]
+        current_y = max(current_y, 250)
+        for order in order_nodes:
+            positioned_nodes[order.id] = (300, current_y)
+
+            trig_pin = order.properties.get("trig_pin")
+            o_hitboxes = []
+            if order.id in parent_to_children:
+                for child_id, p_out, p_in in parent_to_children[order.id]:
+                    child_node = self.nodes_data.get(child_id)
+                    if child_node and child_node.type == "Hitbox" and p_out == trig_pin:
+                        o_hitboxes.append(child_node)
+
+            hb_y = current_y - 20
+            for hb in o_hitboxes:
+                positioned_nodes[hb.id] = (550, hb_y)
+                hb_y += 85
+
+            current_y += 180
+
+        # 5. Размещение Behaviors (Sequence, Flow)
+        behaviors = [n for n in self.nodes_data.values() if n.type in ("Sequence", "Flow")]
+        behaviors.sort(key=lambda n: n.properties.get("name", ""))
+
+        behavior_start_y = 120
+        for i, b in enumerate(behaviors):
+            b_y = behavior_start_y + i * 260
+            positioned_nodes[b.id] = (550, b_y)
+
+            trig_pin = b.properties.get("trig_pin")
+            b_hitboxes = []
+            if b.id in parent_to_children:
+                for child_id, p_out, p_in in parent_to_children[b.id]:
+                    child_node = self.nodes_data.get(child_id)
+                    if child_node and child_node.type == "Hitbox" and p_out == trig_pin:
+                        b_hitboxes.append(child_node)
+
+            hb_y = b_y - 40
+            for hb in b_hitboxes:
+                positioned_nodes[hb.id] = (800, hb_y)
+                hb_y += 85
+
+            # Шаги
+            steps_pins = b.properties.get("steps_pins", [])
+            for step_idx, step_pin in enumerate(steps_pins):
+                if b.id in parent_to_children:
+                    for child_id, p_out, p_in in parent_to_children[b.id]:
+                        if p_out == step_pin:
+                            action_node = self.nodes_data.get(child_id)
+                            if action_node and action_node.type in ("Attack", "Movement", "Projectile"):
+                                if action_node.id not in positioned_nodes:
+                                    act_y = b_y + step_idx * 110
+                                    positioned_nodes[action_node.id] = (1000, act_y)
+
+                                    action_components = []
+                                    if action_node.id in parent_to_children:
+                                        for comp_id, a_out, a_in in parent_to_children[action_node.id]:
+                                            comp_node = self.nodes_data.get(comp_id)
+                                            if comp_node and comp_node.type in ("Hitbox", "Phase"):
+                                                action_components.append(comp_node)
+
+                                    comp_y = act_y - 20
+                                    for comp in action_components:
+                                        positioned_nodes[comp.id] = (1250, comp_y)
+                                        comp_y += 85
+
+        unpositioned = []
+        for node in self.nodes_data.values():
+            if node.id not in positioned_nodes:
+                unpositioned.append(node)
+
+        if unpositioned:
+            unpositioned.sort(key=lambda n: (n.type, n.id))
+            col_x = 1500
+            row_y = 50
+            for node in unpositioned:
+                positioned_nodes[node.id] = (col_x, row_y)
+                row_y += 180
+                if row_y > 800:
+                    row_y = 50
+                    col_x += 250
+
+        for node_id, (x, y) in positioned_nodes.items():
+            if dpg.does_item_exist(node_id):
+                dpg.set_item_pos(node_id, [x, y])
 
     def spawn_flow_btn(self):
         self.create_flow_node()
+
     def spawn_sequence_btn(self):
         self.create_sequence_node()
+
     def spawn_attack_btn(self):
         self.create_attack_node()
+
     def spawn_hitbox_btn(self):
         self.create_hitbox_node()
+
     def spawn_movement_btn(self):
         self.create_movement_node()
+
     def spawn_phase_btn(self):
         self.create_phase_node()
+
     def spawn_projectile_btn(self):
         self.create_projectile_node()
 
@@ -2892,7 +3029,7 @@ class NodeEditorInspectorMixin:
             dpg.add_combo(label="Movement Type", items=["walking", "flying"], default_value=node.properties.get("type_move", "walking"), callback=self.update_property, user_data=(node_id, "type_move"), parent="properties_panel")
             dpg.add_input_float(label="Speed", default_value=safe_float(node.properties.get("speed"), 1.2), callback=self.update_property, user_data=(node_id, "speed"), parent="properties_panel")
             dpg.add_input_int(label="Patrol Range X", default_value=safe_int(node.properties.get("range_x"), 120), callback=self.update_property, user_data=(node_id, "range_x"), parent="properties_panel")
-            dpg.add_input_int(label="Stop Distance", default_value=safe_int(node.properties.get("stop_dist"), 60), callback=self.update_property, user_data=(node_id, "stop_dist"), parent="properties_panel")
+            dpg.add_input_int(label="Stop Distance (Fallback)", default_value=safe_int(node.properties.get("stop_dist"), 60), callback=self.update_property, user_data=(node_id, "stop_dist"), parent="properties_panel")
             dpg.add_checkbox(label="Patrol On Platform", default_value=node.properties.get("patrol_on_platform", False), callback=self.update_property, user_data=(node_id, "patrol_on_platform"), parent="properties_panel")
 
             dpg.add_separator(parent="properties_panel")
@@ -2972,7 +3109,7 @@ class NodeEditorInspectorMixin:
             dpg.add_input_float(label="Hit Force", default_value=safe_float(node.properties.get("kb_force_hit"), 12.0), callback=self.update_property, user_data=(node_id, "kb_force_hit"), parent="properties_panel")
             dpg.add_input_float(label="Parry Angle", default_value=safe_float(node.properties.get("kb_angle_parry"), 0.0), callback=self.update_property, user_data=(node_id, "kb_angle_parry"), parent="properties_panel")
             dpg.add_input_float(label="Parry Force", default_value=safe_float(node.properties.get("kb_force_parry"), 6.0), callback=self.update_property, user_data=(node_id, "kb_force_parry"), parent="properties_panel")
-            dpg.add_combo(label="Sprite Dir", items=["forward", "up", "down", "to_player"], default_value=node.properties.get("sprite_dir", "forward"), callback=self.update_property, user_data=(node_id, "sprite_dir"), parent="properties_panel")
+            dpg.add_combo(label="Sprite Dir", items=["forward", "up", "down", "to_player", "stationary"], default_value=node.properties.get("sprite_dir", "forward"), callback=self.update_property, user_data=(node_id, "sprite_dir"), parent="properties_panel")
 
             dpg.add_separator(parent="properties_panel")
             dpg.add_checkbox(label="Visual Box Enabled", default_value=node.properties.get("vis_enabled", False), callback=self.update_property, user_data=(node_id, "vis_enabled"), parent="properties_panel")
@@ -3056,6 +3193,14 @@ import dearpygui.dearpygui as dpg
 from config import TEMPLATES_FILE, resolve_json
 
 class NodeEditorIOMixin:
+    def sync_with_dpg(self):
+        """
+        Вспомогательный метод для синхронизации Dear PyGui с внутренними структурами данных.
+        Поскольку свойства обновляются мгновенно через соответствующие callbacks,
+        данный метод может оставаться пустым.
+        """
+        pass
+
     def load_preset_file(self, sender, app_data):
         filepath = dpg.get_value("preset_combo")
         if not filepath or not os.path.exists(filepath):
@@ -3107,38 +3252,104 @@ class NodeEditorIOMixin:
 
         resolved_data = resolve_json(preset_data, templates)
 
-        raw_det = resolved_data.get("detection", {})
-        raw_det_preset = preset_data.get("detection", {})
-        raw_shape_preset = raw_det_preset.get("shape", {})
-
-        raw_shape = raw_det.get("shape", {})
-        det_shape_type = raw_shape.get("type", "rectangle")
-        det_type = raw_det.get("type", "following")
+        # 1. Свойства Root-ноды
+        body_cfg = resolved_data.get("body", {})
+        body_w = body_cfg.get("w", 30)
+        body_h = body_cfg.get("h", 50)
 
         root_props = {
             "hp": preset_data.get("hp", 3),
-            "body_template": preset_data.get("body", {}).get("template", "forms.rect"),
-            "body_w": preset_data.get("body", {}).get("w", 30),
-            "body_h": preset_data.get("body", {}).get("h", 50),
+            "body_w": body_w,
+            "body_h": body_h,
             "type_move": preset_data.get("movement_config", {}).get("type_move", "walking"),
             "speed": preset_data.get("movement_config", {}).get("speed", 1.2),
             "range_x": preset_data.get("movement_config", {}).get("range_x", 120),
             "stop_dist": preset_data.get("movement_config", {}).get("stop_dist", 60),
             "patrol_on_platform": preset_data.get("movement_config", {}).get("patrol_on_platform", False),
-            "det_template": raw_det_preset.get("template", "detections.front_view"),
-            "det_shape_template": raw_shape_preset.get("template", "forms.rect"),
-            "det_shape_type": det_shape_type,
-            "det_type": det_type,
-            "det_w": raw_shape.get("w", 220),
-            "det_h": raw_shape.get("h", 70),
-            "det_r": raw_shape.get("r", 110),
-            "det_offset_x": raw_det.get("offset_x", 0),
-            "det_offset_y": raw_det.get("offset_y", -10),
-            "det_angle": raw_det.get("angle", 0)
+            "name": preset_data.get("name", "Enemy")
         }
+
         root_id = self.create_root_node(root_props)
         root_node = self.nodes_data[root_id]
 
+        # 2. Восстановление хитбоксов тела противника (Root -> Body)
+        body_shapes = preset_data.get("body_shapes", [])
+        if not body_shapes and "body" in preset_data:
+            b_cfg = preset_data["body"]
+            body_shapes = [{
+                "shape": {"template": b_cfg.get("template", "forms.rect"), "type": "rectangle", "w": b_cfg.get("w", 30), "h": b_cfg.get("h", 50)},
+                "offset_x": 0, "offset_y": 0, "angle": 0
+            }]
+
+        for b_shape in body_shapes:
+            geom = b_shape.get("shape", {})
+            hb_id = self.create_hitbox_node({
+                "shape_template": geom.get("template", "forms.rect"),
+                "shape_type": geom.get("type", "rectangle"),
+                "w": geom.get("w", 30), "h": geom.get("h", 50), "r": geom.get("r", 25),
+                "offset_x": b_shape.get("offset_x", 0), "offset_y": b_shape.get("offset_y", 0),
+                "angle": b_shape.get("angle", 0), "delay": 0, "duration": 9999, "damage": 0
+            })
+            p_out = root_node.properties["body_pin"]
+            p_in = list(self.nodes_data[hb_id].input_pins.keys())[0]
+            link_id = dpg.add_node_link(p_out, p_in, parent="editor_tag")
+            self.links_data[link_id] = (p_out, p_in)
+
+        # 3. Восстановление хитбоксов детекции / зрения (Root -> Detection)
+        det_shapes = preset_data.get("detection_shapes", [])
+        if not det_shapes and "detection" in preset_data:
+            det = preset_data["detection"]
+            geom = det.get("shape", {})
+            resolved_det = resolved_data.get("detection", {})
+            det_type = resolved_det.get("type", "following")
+
+            det_shapes = [{
+                "shape": {"template": geom.get("template", "forms.rect"), "type": geom.get("type", "rectangle" if "w" in geom else "circle"), "w": geom.get("w", 220), "h": geom.get("h", 70), "r": geom.get("r", 110)},
+                "offset_x": det.get("offset_x", 0), "offset_y": det.get("offset_y", -10),
+                "angle": det.get("angle", 0), "type": det_type
+            }]
+
+        for d_shape in det_shapes:
+            geom = d_shape.get("shape", {})
+            hb_id = self.create_hitbox_node({
+                "shape_template": geom.get("template", "forms.rect"),
+                "shape_type": geom.get("type", "rectangle"),
+                "w": geom.get("w", 220), "h": geom.get("h", 70), "r": geom.get("r", 110),
+                "offset_x": d_shape.get("offset_x", 0), "offset_y": d_shape.get("offset_y", -10),
+                "angle": d_shape.get("angle", 0), "delay": 0, "duration": 9999, "damage": 0,
+                "sprite_dir": d_shape.get("type", "following")
+            })
+            p_out = root_node.properties["det_pin"]
+            p_in = list(self.nodes_data[hb_id].input_pins.keys())[0]
+            link_id = dpg.add_node_link(p_out, p_in, parent="editor_tag")
+            self.links_data[link_id] = (p_out, p_in)
+
+        # 3.5 Восстановление хитбоксов остановки преследования (Root -> Stopping)
+        stop_shapes = preset_data.get("stop_shapes", [])
+        if not stop_shapes:
+            old_stop_dist = preset_data.get("movement_config", {}).get("stop_dist", 60)
+            stop_shapes = [{
+                "shape": {"template": "forms.rect", "type": "rectangle", "w": old_stop_dist * 2, "h": body_h + 40},
+                "offset_x": -old_stop_dist + body_w // 2, "offset_y": -20,
+                "angle": 0, "type": "stationary"
+            }]
+
+        for s_shape in stop_shapes:
+            geom = s_shape.get("shape", {})
+            hb_id = self.create_hitbox_node({
+                "shape_template": geom.get("template", "forms.rect"),
+                "shape_type": geom.get("type", "rectangle"),
+                "w": geom.get("w", body_w * 2), "h": geom.get("h", body_h + 40), "r": geom.get("r", 30),
+                "offset_x": s_shape.get("offset_x", 0), "offset_y": s_shape.get("offset_y", 0),
+                "angle": s_shape.get("angle", 0), "delay": 0, "duration": 9999, "damage": 0,
+                "sprite_dir": s_shape.get("type", "stationary")
+            })
+            p_out = root_node.properties["stop_pin"]
+            p_in = list(self.nodes_data[hb_id].input_pins.keys())[0]
+            link_id = dpg.add_node_link(p_out, p_in, parent="editor_tag")
+            self.links_data[link_id] = (p_out, p_in)
+
+        # 4. Атаки и их классические хитбоксы
         attack_nodes = []
         for atk_idx, atk in enumerate(resolved_data.get("attacks", [])):
             atk_props = {
@@ -3189,14 +3400,14 @@ class NodeEditorIOMixin:
                         "vis_offset_y": vbox.get("offset_y", 0)
                     })
                 hb_node_id = self.create_hitbox_node(hb_props)
-                hb_node = self.nodes_data[hb_node_id]
-                p_hb_in = list(hb_node.input_pins.keys())[0]
+                p_hb_in = list(self.nodes_data[hb_node_id].input_pins.keys())[0]
 
                 link_id = dpg.add_node_link(p_hitboxes_out, p_hb_in, parent="editor_tag")
                 self.links_data[link_id] = (p_hitboxes_out, p_hb_in)
 
+        # 5. Перемещения и зоны остановки действия (Movement -> Stop Area Hitboxes)
         movement_nodes = []
-        for mov in resolved_data.get("movements", []):
+        for mov_idx, mov in enumerate(resolved_data.get("movements", [])):
             mov_props = {
                 "name": mov.get("name", "Movement"),
                 "stop_dist": mov.get("stop_dist", 0)
@@ -3205,6 +3416,7 @@ class NodeEditorIOMixin:
             mov_node = self.nodes_data[mov_node_id]
             movement_nodes.append(mov_node)
 
+            # Восстанавливаем фазы перемещения
             p_phases_out = list(mov_node.output_pins.keys())[0]
             for phase in mov.get("phases", []):
                 phase_props = {
@@ -3216,14 +3428,37 @@ class NodeEditorIOMixin:
                     "duration": phase.get("duration", 15)
                 }
                 phase_node_id = self.create_phase_node(phase_props)
-                phase_node = self.nodes_data[phase_node_id]
-                p_phase_in = list(phase_node.input_pins.keys())[0]
-
+                p_phase_in = list(self.nodes_data[phase_node_id].input_pins.keys())[0]
                 link_id = dpg.add_node_link(p_phases_out, p_phase_in, parent="editor_tag")
                 self.links_data[link_id] = (p_phases_out, p_phase_in)
 
+            # Восстанавливаем зоны остановки
+            preset_mov_list = preset_data.get("movements", [])
+            preset_mov = preset_mov_list[mov_idx] if mov_idx < len(preset_mov_list) else {}
+            stop_shapes_mov_list = preset_mov.get("stop_shapes", [])
+            if not stop_shapes_mov_list and preset_mov.get("stop_dist", 0) > 0:
+                stop_shapes_mov_list = [{
+                    "shape": {"template": "forms.rect", "type": "rectangle", "w": preset_mov["stop_dist"] * 2, "h": 60},
+                    "offset_x": 0, "offset_y": 0, "angle": 0
+                }]
+
+            for s_shape in stop_shapes_mov_list:
+                geom = s_shape.get("shape", {})
+                hb_id = self.create_hitbox_node({
+                    "shape_template": geom.get("template", "forms.rect"),
+                    "shape_type": geom.get("type", "rectangle"),
+                    "w": geom.get("w", 120), "h": geom.get("h", 60), "r": geom.get("r", 30),
+                    "offset_x": s_shape.get("offset_x", 0), "offset_y": s_shape.get("offset_y", 0),
+                    "angle": s_shape.get("angle", 0), "delay": 0, "duration": 9999, "damage": 0
+                })
+                p_out = mov_node.properties["stop_pin"]
+                p_in = list(self.nodes_data[hb_id].input_pins.keys())[0]
+                link_id = dpg.add_node_link(p_out, p_in, parent="editor_tag")
+                self.links_data[link_id] = (p_out, p_in)
+
+        # 6. Снаряды и их хитбоксы (Projectile -> Hitboxes)
         projectile_nodes = []
-        for proj in resolved_data.get("projectiles", []):
+        for proj_idx, proj in enumerate(resolved_data.get("projectiles", [])):
             proj_props = {
                 "name": proj.get("name", "Projectile"),
                 "speed": proj.get("speed", 10.0),
@@ -3236,8 +3471,33 @@ class NodeEditorIOMixin:
                 "shoot_cooldown": proj.get("shoot_cooldown", 30)
             }
             proj_node_id = self.create_projectile_node(proj_props)
-            projectile_nodes.append(self.nodes_data[proj_node_id])
+            proj_node = self.nodes_data[proj_node_id]
+            projectile_nodes.append(proj_node)
 
+            preset_proj_list = preset_data.get("projectiles", [])
+            preset_proj = preset_proj_list[proj_idx] if proj_idx < len(preset_proj_list) else {}
+            proj_shapes = preset_proj.get("shapes", [])
+            if not proj_shapes:
+                proj_shapes = [{
+                    "shape": {"template": "forms.circle", "type": "circle", "r": proj_props["radius"]},
+                    "offset_x": 0, "offset_y": 0, "angle": 0
+                }]
+
+            for p_shape in proj_shapes:
+                geom = p_shape.get("shape", {})
+                hb_id = self.create_hitbox_node({
+                    "shape_template": geom.get("template", "forms.circle"),
+                    "shape_type": geom.get("type", "circle"),
+                    "w": geom.get("w", 16), "h": geom.get("h", 16), "r": geom.get("r", 8),
+                    "offset_x": p_shape.get("offset_x", 0), "offset_y": p_shape.get("offset_y", 0),
+                    "angle": p_shape.get("angle", 0), "delay": 0, "duration": 9999, "damage": proj_props["damage"]
+                })
+                p_out = proj_node.properties["hitbox_pin"]
+                p_in = list(self.nodes_data[hb_id].input_pins.keys())[0]
+                link_id = dpg.add_node_link(p_out, p_in, parent="editor_tag")
+                self.links_data[link_id] = (p_out, p_in)
+
+        # 7. Последовательности и их триггерные хитбоксы (Sequence -> Trigger shapes)
         sequence_nodes = []
         p_root_seqs = list(root_node.output_pins.keys())[1]
         for seq_idx, seq in enumerate(resolved_data.get("sequences", [])):
@@ -3251,13 +3511,6 @@ class NodeEditorIOMixin:
                 "chance": seq.get("chance", 0.5),
                 "cooldown": seq.get("cooldown", 120),
                 "post_cooldown": seq.get("post_cooldown", 30),
-                "trig_shape_template": preset_shape.get("template", "forms.rect"),
-                "trig_shape_type": seq.get("trigger_zone", {}).get("shape", {}).get("type", "rectangle"),
-                "trig_w": seq.get("trigger_zone", {}).get("shape", {}).get("w", 90),
-                "trig_h": seq.get("trigger_zone", {}).get("shape", {}).get("h", 50),
-                "trig_r": seq.get("trigger_zone", {}).get("shape", {}).get("r", 45),
-                "trig_offset_x": seq.get("trigger_zone", {}).get("offset_x", 10),
-                "trig_offset_y": seq.get("trigger_zone", {}).get("offset_y", 0),
                 "trig_type": seq.get("trigger_zone", {}).get("type", "following"),
                 "trig_hold_time": seq.get("trigger_zone", {}).get("hold_time", 0),
                 "trig_consecutive_limit": seq.get("trigger_zone", {}).get("consecutive_limit", 3),
@@ -3274,10 +3527,36 @@ class NodeEditorIOMixin:
             seq_node = self.nodes_data[seq_node_id]
             sequence_nodes.append(seq_node)
 
+            # Соединяем Root -> Sequence
             p_seq_in = list(seq_node.input_pins.keys())[0]
             link_id = dpg.add_node_link(p_root_seqs, p_seq_in, parent="editor_tag")
             self.links_data[link_id] = (p_root_seqs, p_seq_in)
 
+            # Восстанавливаем триггерные хитбоксы последовательности
+            trig_shapes = preset_seq.get("trigger_shapes", [])
+            if not trig_shapes and preset_tz:
+                trig_shapes = [{
+                    "shape": {"template": preset_shape.get("template", "forms.rect"), "type": preset_shape.get("type", "rectangle" if "w" in preset_shape else "circle"), "w": preset_shape.get("w", 90), "h": preset_shape.get("h", 50), "r": preset_shape.get("r", 45)},
+                    "offset_x": preset_tz.get("offset_x", 10), "offset_y": preset_tz.get("offset_y", 0),
+                    "angle": preset_tz.get("angle", 0), "type": preset_tz.get("type", "following")
+                }]
+
+            for t_shape in trig_shapes:
+                geom = t_shape.get("shape", {})
+                hb_id = self.create_hitbox_node({
+                    "shape_template": geom.get("template", "forms.rect"),
+                    "shape_type": geom.get("type", "rectangle"),
+                    "w": geom.get("w", 90), "h": geom.get("h", 50), "r": geom.get("r", 45),
+                    "offset_x": t_shape.get("offset_x", 10), "offset_y": t_shape.get("offset_y", 0),
+                    "angle": t_shape.get("angle", 0), "delay": 0, "duration": 9999, "damage": 0,
+                    "sprite_dir": t_shape.get("type", "following")
+                })
+                p_out = seq_node.properties["trig_pin"]
+                p_in = list(self.nodes_data[hb_id].input_pins.keys())[0]
+                link_id = dpg.add_node_link(p_out, p_in, parent="editor_tag")
+                self.links_data[link_id] = (p_out, p_in)
+
+            # Соединяем шаги последовательности с атаками/перемещениями
             steps_pins = seq_node.properties.get("steps_pins", [])
             for step_idx, step_pin_id in enumerate(steps_pins):
                 step_data = seq_props["steps"][step_idx]
@@ -3297,6 +3576,7 @@ class NodeEditorIOMixin:
                     link_id = dpg.add_node_link(step_pin_id, p_act_in, parent="editor_tag")
                     self.links_data[link_id] = (step_pin_id, p_act_in)
 
+        # 8. Потоки поведения и их триггерные хитбоксы (Flow -> Trigger shapes)
         flow_nodes = []
         p_root_flows = list(root_node.output_pins.keys())[0]
         for flow_idx, flow in enumerate(resolved_data.get("flows", [])):
@@ -3310,21 +3590,10 @@ class NodeEditorIOMixin:
                 "chance": flow.get("chance", 0.5),
                 "cooldown": flow.get("cooldown", 180),
                 "post_cooldown": flow.get("post_cooldown", 30),
-                "trigger_zone": {
-                    "shape": {
-                        "template": preset_shape.get("template", "forms.rect"),
-                        "type": flow.get("trigger_zone", {}).get("shape", {}).get("type", "rectangle"),
-                        "w": flow.get("trigger_zone", {}).get("shape", {}).get("w", 250),
-                        "h": flow.get("trigger_zone", {}).get("shape", {}).get("h", 80),
-                        "r": flow.get("trigger_zone", {}).get("shape", {}).get("r", 80)
-                    },
-                    "offset_x": flow.get("trigger_zone", {}).get("offset_x", 0),
-                    "offset_y": flow.get("trigger_zone", {}).get("offset_y", 0),
-                    "type": flow.get("trigger_zone", {}).get("type", "following"),
-                    "hold_time": flow.get("trigger_zone", {}).get("hold_time", 0),
-                    "consecutive_limit": flow.get("trigger_zone", {}).get("consecutive_limit", 3),
-                    "accumulate_hold": flow.get("trigger_zone", {}).get("accumulate_hold", True)
-                },
+                "trig_type": flow.get("trigger_zone", {}).get("type", "following"),
+                "trig_hold_time": flow.get("trigger_zone", {}).get("hold_time", 0),
+                "trig_consecutive_limit": flow.get("trigger_zone", {}).get("consecutive_limit", 3),
+                "trig_accumulate_hold": flow.get("trigger_zone", {}).get("accumulate_hold", True),
                 "steps": flow.get("steps", [])
             }
             if "color" in flow:
@@ -3337,10 +3606,36 @@ class NodeEditorIOMixin:
             flow_node = self.nodes_data[flow_node_id]
             flow_nodes.append(flow_node)
 
+            # Соединяем Root -> Flow
             p_flow_parent = list(flow_node.input_pins.keys())[0]
             link_id = dpg.add_node_link(p_root_flows, p_flow_parent, parent="editor_tag")
             self.links_data[link_id] = (p_root_flows, p_flow_parent)
 
+            # Восстанавливаем триггерные хитбоксы потока
+            trig_shapes = preset_flow.get("trigger_shapes", [])
+            if not trig_shapes and preset_tz:
+                trig_shapes = [{
+                    "shape": {"template": preset_shape.get("template", "forms.rect"), "type": preset_shape.get("type", "rectangle" if "w" in preset_shape else "circle"), "w": preset_shape.get("w", 250), "h": preset_shape.get("h", 80), "r": preset_shape.get("r", 80)},
+                    "offset_x": preset_tz.get("offset_x", 0), "offset_y": preset_tz.get("offset_y", 0),
+                    "angle": preset_tz.get("angle", 0), "type": preset_tz.get("type", "following")
+                }]
+
+            for t_shape in trig_shapes:
+                geom = t_shape.get("shape", {})
+                hb_id = self.create_hitbox_node({
+                    "shape_template": geom.get("template", "forms.rect"),
+                    "shape_type": geom.get("type", "rectangle"),
+                    "w": geom.get("w", 250), "h": geom.get("h", 80), "r": geom.get("r", 80),
+                    "offset_x": t_shape.get("offset_x", 0), "offset_y": t_shape.get("offset_y", 0),
+                    "angle": t_shape.get("angle", 0), "delay": 0, "duration": 9999, "damage": 0,
+                    "sprite_dir": t_shape.get("type", "following")
+                })
+                p_out = flow_node.properties["trig_pin"]
+                p_in = list(self.nodes_data[hb_id].input_pins.keys())[0]
+                link_id = dpg.add_node_link(p_out, p_in, parent="editor_tag")
+                self.links_data[link_id] = (p_out, p_in)
+
+            # Соединяем шаги поведения с последовательностями
             flow_steps_pins = flow_node.properties.get("steps_pins", [])
             for step_idx, step_pin_id in enumerate(flow_steps_pins):
                 step_data = flow_props["steps"][step_idx]
@@ -3360,6 +3655,7 @@ class NodeEditorIOMixin:
                         link_id = dpg.add_node_link(step_pin_id, p_seq_trigger, parent="editor_tag")
                         self.links_data[link_id] = (step_pin_id, p_seq_trigger)
 
+        # 9. Цепочки Порядка и их триггерные хитбоксы (Order -> Trigger shapes)
         for order_idx, order_data in enumerate(resolved_data.get("orders", [])):
             preset_order_list = preset_data.get("orders", [])
             preset_order = preset_order_list[order_idx] if order_idx < len(preset_order_list) else {}
@@ -3371,13 +3667,6 @@ class NodeEditorIOMixin:
                 "chance": order_data.get("chance", 1.0),
                 "cooldown": order_data.get("cooldown", 120),
                 "post_cooldown": order_data.get("post_cooldown", 30),
-                "trig_shape_template": preset_shape.get("template", "forms.rect"),
-                "trig_shape_type": order_data.get("trigger_zone", {}).get("shape", {}).get("type", "rectangle"),
-                "trig_w": order_data.get("trigger_zone", {}).get("shape", {}).get("w", 150),
-                "trig_h": order_data.get("trigger_zone", {}).get("shape", {}).get("h", 60),
-                "trig_r": order_data.get("trigger_zone", {}).get("shape", {}).get("r", 75),
-                "trig_offset_x": order_data.get("trigger_zone", {}).get("offset_x", 0),
-                "trig_offset_y": order_data.get("trigger_zone", {}).get("offset_y", 0),
                 "trig_type": order_data.get("trigger_zone", {}).get("type", "following"),
                 "trig_hold_time": order_data.get("trigger_zone", {}).get("hold_time", 0),
                 "trig_consecutive_limit": order_data.get("trigger_zone", {}).get("consecutive_limit", 3),
@@ -3389,6 +3678,31 @@ class NodeEditorIOMixin:
             if "pos" in order_data:
                 dpg.set_item_pos(order_node_id, order_data["pos"])
 
+            # Восстанавливаем триггерные хитбоксы порядка
+            trig_shapes = preset_order.get("trigger_shapes", [])
+            if not trig_shapes and preset_tz:
+                trig_shapes = [{
+                    "shape": {"template": preset_shape.get("template", "forms.rect"), "type": preset_shape.get("type", "rectangle" if "w" in preset_shape else "circle"), "w": preset_shape.get("w", 150), "h": preset_shape.get("h", 60), "r": preset_shape.get("r", 75)},
+                    "offset_x": preset_tz.get("offset_x", 0), "offset_y": preset_tz.get("offset_y", 0),
+                    "angle": preset_tz.get("angle", 0), "type": preset_tz.get("type", "following")
+                }]
+
+            for t_shape in trig_shapes:
+                geom = t_shape.get("shape", {})
+                hb_id = self.create_hitbox_node({
+                    "shape_template": geom.get("template", "forms.rect"),
+                    "shape_type": geom.get("type", "rectangle"),
+                    "w": geom.get("w", 150), "h": geom.get("h", 60), "r": geom.get("r", 75),
+                    "offset_x": t_shape.get("offset_x", 0), "offset_y": t_shape.get("offset_y", 0),
+                    "angle": t_shape.get("angle", 0), "delay": 0, "duration": 9999, "damage": 0,
+                    "sprite_dir": t_shape.get("type", "following")
+                })
+                p_out = order_node.properties["trig_pin"]
+                p_in = list(self.nodes_data[hb_id].input_pins.keys())[0]
+                link_id = dpg.add_node_link(p_out, p_in, parent="editor_tag")
+                self.links_data[link_id] = (p_out, p_in)
+
+            # Восстанавливаем связи шагов
             for step_item in order_data.get("steps", []):
                 self.add_order_step(order_node_id)
                 step_pins = order_node.properties.get("steps_pins", [])
@@ -3422,39 +3736,105 @@ class NodeEditorIOMixin:
             print("[Экспорт Error] Узел Root не обнаружен!")
             return None
 
-        det_shape_type = root_node.properties.get("det_shape_type", "rectangle")
-        det_template = "forms.circle" if det_shape_type == "circle" else "forms.rect"
-        det_shape = {
-            "template": det_template,
-            "type": det_shape_type
+        # Определение связанных хитбоксов для Root -> Body
+        body_shapes_list = []
+        body_pin = root_node.properties.get("body_pin")
+        for _, (p_out, p_in) in self.links_data.items():
+            if p_out == body_pin:
+                hb_node_id = self.pin_to_node.get(p_in)
+                if hb_node_id and self.nodes_data[hb_node_id].type == "Hitbox":
+                    hb = self.nodes_data[hb_node_id]
+                    stype = hb.properties.get("shape_type", "rectangle")
+                    body_shapes_list.append({
+                        "shape": {
+                            "template": hb.properties.get("shape_template", "forms.rect"),
+                            "type": stype,
+                            **({"r": hb.properties.get("r", 25)} if stype == "circle" else {"w": hb.properties.get("w", 30), "h": hb.properties.get("h", 50)})
+                        },
+                        "offset_x": hb.properties.get("offset_x", 0),
+                        "offset_y": hb.properties.get("offset_y", 0),
+                        "angle": hb.properties.get("angle", 0)
+                    })
+
+        # Определение связанных хитбоксов для Root -> Detection
+        detection_shapes_list = []
+        det_pin = root_node.properties.get("det_pin")
+        for _, (p_out, p_in) in self.links_data.items():
+            if p_out == det_pin:
+                hb_node_id = self.pin_to_node.get(p_in)
+                if hb_node_id and self.nodes_data[hb_node_id].type == "Hitbox":
+                    hb = self.nodes_data[hb_node_id]
+                    stype = hb.properties.get("shape_type", "rectangle")
+                    detection_shapes_list.append({
+                        "shape": {
+                            "template": hb.properties.get("shape_template", "forms.rect"),
+                            "type": stype,
+                            **({"r": hb.properties.get("r", 110)} if stype == "circle" else {"w": hb.properties.get("w", 220), "h": hb.properties.get("h", 70)})
+                        },
+                        "offset_x": hb.properties.get("offset_x", 0),
+                        "offset_y": hb.properties.get("offset_y", -10),
+                        "angle": hb.properties.get("angle", 0),
+                        "type": hb.properties.get("sprite_dir", "following")
+                    })
+
+        # Определение связанных хитбоксов для Root -> Stopping (Зона остановки преследования)
+        stop_shapes_list = []
+        stop_pin = root_node.properties.get("stop_pin")
+        for _, (p_out, p_in) in self.links_data.items():
+            if p_out == stop_pin:
+                hb_node_id = self.pin_to_node.get(p_in)
+                if hb_node_id and self.nodes_data[hb_node_id].type == "Hitbox":
+                    hb = self.nodes_data[hb_node_id]
+                    stype = hb.properties.get("shape_type", "rectangle")
+                    stop_shapes_list.append({
+                        "shape": {
+                            "template": hb.properties.get("shape_template", "forms.rect"),
+                            "type": stype,
+                            **({"r": hb.properties.get("r", 40)} if stype == "circle" else {"w": hb.properties.get("w", 120), "h": hb.properties.get("h", 70)})
+                        },
+                        "offset_x": hb.properties.get("offset_x", 0),
+                        "offset_y": hb.properties.get("offset_y", 0),
+                        "angle": hb.properties.get("angle", 0),
+                        "type": hb.properties.get("sprite_dir", "stationary")
+                    })
+
+        # Формируем fallback-значения для старого классического движка
+        fallback_body = body_shapes_list[0]["shape"] if body_shapes_list else {"template": "forms.rect", "w": 30, "h": 50}
+        if body_shapes_list:
+            fallback_body["w"] = body_shapes_list[0]["shape"].get("w", 30)
+            fallback_body["h"] = body_shapes_list[0]["shape"].get("h", 50)
+
+        fallback_det = {
+            "template": "detections.front_view",
+            "shape": detection_shapes_list[0]["shape"] if detection_shapes_list else {"template": "forms.rect", "w": 220, "h": 70},
+            "offset_x": detection_shapes_list[0]["offset_x"] if detection_shapes_list else 0,
+            "offset_y": detection_shapes_list[0]["offset_y"] if detection_shapes_list else -10,
+            "type": detection_shapes_list[0]["type"] if detection_shapes_list else "following"
         }
-        if det_shape_type == "circle":
-            det_shape["r"] = root_node.properties.get("det_r", 110)
-        else:
-            det_shape["w"] = root_node.properties.get("det_w", 220)
-            det_shape["h"] = root_node.properties.get("det_h", 70)
+
+        # Вычисляем математический fallback_stop_dist из первого полигона остановки
+        fallback_stop_dist = root_node.properties.get("stop_dist", 60)
+        if stop_shapes_list:
+            first_shape = stop_shapes_list[0]["shape"]
+            if first_shape.get("type") == "circle":
+                fallback_stop_dist = first_shape.get("r", 40)
+            else:
+                fallback_stop_dist = int(first_shape.get("w", 120) / 2)
 
         export_data = {
             "hp": root_node.properties.get("hp", 3),
-            "body": {
-                "template": root_node.properties.get("body_template", "forms.rect"),
-                "w": root_node.properties.get("body_w", 30),
-                "h": root_node.properties.get("body_h", 50)
-            },
+            "body": fallback_body,
+            "body_shapes": body_shapes_list,
             "movement_config": {
                 "type_move": root_node.properties.get("type_move", "walking"),
                 "speed": root_node.properties.get("speed", 1.2),
                 "range_x": root_node.properties.get("range_x", 120),
-                "stop_dist": root_node.properties.get("stop_dist", 60),
+                "stop_dist": fallback_stop_dist,
                 "patrol_on_platform": root_node.properties.get("patrol_on_platform", False)
             },
-            "detection": {
-                "template": root_node.properties.get("det_template", "detections.front_view"),
-                "shape": det_shape,
-                "offset_x": root_node.properties.get("det_offset_x", 0),
-                "offset_y": root_node.properties.get("det_offset_y", -10),
-                "angle": root_node.properties.get("det_angle", 0)
-            },
+            "detection": fallback_det,
+            "detection_shapes": detection_shapes_list,
+            "stop_shapes": stop_shapes_list,
             "projectiles": [],
             "attacks": [],
             "movements": [],
@@ -3470,6 +3850,7 @@ class NodeEditorIOMixin:
         p_root_flows = list(root_node.output_pins.keys())[0]
         p_root_seqs = list(root_node.output_pins.keys())[1]
 
+        # Сбор связанных Flows и Sequences
         connected_flow_ids = []
         for _, (p_out, p_in) in self.links_data.items():
             if p_out == p_root_flows:
@@ -3484,15 +3865,10 @@ class NodeEditorIOMixin:
                 if seq_node_id and seq_node_id in self.nodes_data:
                     connected_seq_ids.append(seq_node_id)
 
-        sorted_flows = sorted(
-            [self.nodes_data[nid] for nid in connected_flow_ids if self.nodes_data[nid].type == "Flow"],
-            key=lambda x: dpg.get_item_pos(x.id)[1]
-        )
-        sorted_sequences = sorted(
-            [self.nodes_data[nid] for nid in connected_seq_ids if self.nodes_data[nid].type == "Sequence"],
-            key=lambda x: dpg.get_item_pos(x.id)[1]
-        )
+        sorted_flows = sorted([self.nodes_data[nid] for nid in connected_flow_ids if self.nodes_data[nid].type == "Flow"], key=lambda x: dpg.get_item_pos(x.id)[1])
+        sorted_sequences = sorted([self.nodes_data[nid] for nid in connected_seq_ids if self.nodes_data[nid].type == "Sequence"], key=lambda x: dpg.get_item_pos(x.id)[1])
 
+        # 10. Экспорт атак (Attacks)
         for atk_node in sorted_attacks:
             atk_dict = {
                 "name": atk_node.properties.get("name", "Attack"),
@@ -3512,19 +3888,12 @@ class NodeEditorIOMixin:
             connected_hitboxes.sort(key=lambda x: x.properties.get("delay", 0))
             for hb in connected_hitboxes:
                 hb_shape_type = hb.properties.get("shape_type", "rectangle")
-                hb_template = "forms.circle" if hb_shape_type == "circle" else "forms.rect"
-                hb_shape = {
-                    "template": hb_template,
-                    "type": hb_shape_type
-                }
-                if hb_shape_type == "circle":
-                    hb_shape["r"] = hb.properties.get("r", 25)
-                else:
-                    hb_shape["w"] = hb.properties.get("w", 50)
-                    hb_shape["h"] = hb.properties.get("h", 40)
-
                 hb_dict = {
-                    "shape": hb_shape,
+                    "shape": {
+                        "template": hb.properties.get("shape_template", "forms.rect"),
+                        "type": hb_shape_type,
+                        **({"r": hb.properties.get("r", 25)} if hb_shape_type == "circle" else {"w": hb.properties.get("w", 50), "h": hb.properties.get("h", 40)})
+                    },
                     "offset_x": hb.properties.get("offset_x", 10),
                     "offset_y": hb.properties.get("offset_y", 0),
                     "angle": hb.properties.get("angle", 0),
@@ -3539,25 +3908,44 @@ class NodeEditorIOMixin:
                 }
                 if hb.properties.get("vis_enabled", False):
                     vis_type = hb.properties.get("vis_type", "rectangle")
-                    vbox = {
+                    hb_dict["visual_box"] = {
                         "type": vis_type,
                         "offset_x": hb.properties.get("vis_offset_x", 0),
-                        "offset_y": hb.properties.get("vis_offset_y", 0)
+                        "offset_y": hb.properties.get("vis_offset_y", 0),
+                        **({"r": hb.properties.get("vis_r", 25)} if vis_type == "circle" else {"w": hb.properties.get("vis_w", 50), "h": hb.properties.get("vis_h", 40)})
                     }
-                    if vis_type == "circle":
-                        vbox["r"] = hb.properties.get("vis_r", 25)
-                    else:
-                        vbox["w"] = hb.properties.get("vis_w", 50)
-                        vbox["h"] = hb.properties.get("vis_h", 40)
-                    hb_dict["visual_box"] = vbox
-
                 atk_dict["shapes"].append(hb_dict)
             export_data["attacks"].append(atk_dict)
 
+        # 11. Экспорт перемещений (Movements)
         for mov_node in sorted_movements:
+            stop_shapes_mov_list = []
+            stop_pin_mov = mov_node.properties.get("stop_pin")
+            for _, (p_out, p_in) in self.links_data.items():
+                if p_out == stop_pin_mov:
+                    hb_node_id = self.pin_to_node.get(p_in)
+                    if hb_node_id and self.nodes_data[hb_node_id].type == "Hitbox":
+                        hb = self.nodes_data[hb_node_id]
+                        stype = hb.properties.get("shape_type", "rectangle")
+                        stop_shapes_mov_list.append({
+                            "shape": {
+                                "template": hb.properties.get("shape_template", "forms.rect"),
+                                "type": stype,
+                                **({"r": hb.properties.get("r", 30)} if stype == "circle" else {"w": hb.properties.get("w", 120), "h": hb.properties.get("h", 60)})
+                            },
+                            "offset_x": hb.properties.get("offset_x", 0),
+                            "offset_y": hb.properties.get("offset_y", 0),
+                            "angle": hb.properties.get("angle", 0)
+                        })
+
+            fallback_mov_stop_dist = mov_node.properties.get("stop_dist", 0)
+            if stop_shapes_mov_list and stop_shapes_mov_list[0]["shape"].get("type") == "rectangle":
+                fallback_mov_stop_dist = int(stop_shapes_mov_list[0]["shape"].get("w", 120) / 2)
+
             mov_dict = {
                 "name": mov_node.properties.get("name", "Movement"),
-                "stop_dist": mov_node.properties.get("stop_dist", 0),
+                "stop_dist": fallback_mov_stop_dist,
+                "stop_shapes": stop_shapes_mov_list,
                 "phases": []
             }
 
@@ -3571,58 +3959,93 @@ class NodeEditorIOMixin:
 
             connected_phases.sort(key=lambda x: x.properties.get("delay", 0))
             for ph in connected_phases:
-                phase_dict = {
+                mov_dict["phases"].append({
                     "direction": ph.properties.get("direction", "forward"),
                     "curve": ph.properties.get("curve", "fade_out"),
                     "force_x": ph.properties.get("force_x", 8.0),
                     "force_y": ph.properties.get("force_y", 0.0),
                     "delay": ph.properties.get("delay", 0),
                     "duration": ph.properties.get("duration", 15)
-                }
-                mov_dict["phases"].append(phase_dict)
+                })
             export_data["movements"].append(mov_dict)
 
+        # 12. Экспорт снарядов (Projectiles)
         for proj_node in sorted_projectiles:
-            proj_dict = {
+            proj_shapes_list = []
+            hitbox_pin = proj_node.properties.get("hitbox_pin")
+            for _, (p_out, p_in) in self.links_data.items():
+                if p_out == hitbox_pin:
+                    hb_node_id = self.pin_to_node.get(p_in)
+                    if hb_node_id and self.nodes_data[hb_node_id].type == "Hitbox":
+                        hb = self.nodes_data[hb_node_id]
+                        stype = hb.properties.get("shape_type", "rectangle")
+                        proj_shapes_list.append({
+                            "shape": {
+                                "template": hb.properties.get("shape_template", "forms.circle"),
+                                "type": stype,
+                                **({"r": hb.properties.get("r", 8)} if stype == "circle" else {"w": hb.properties.get("w", 16), "h": hb.properties.get("h", 16)})
+                            },
+                            "offset_x": hb.properties.get("offset_x", 0),
+                            "offset_y": hb.properties.get("offset_y", 0),
+                            "angle": hb.properties.get("angle", 0)
+                        })
+
+            fallback_radius = proj_node.properties.get("radius", 8)
+            if proj_shapes_list and proj_shapes_list[0]["shape"].get("type") == "circle":
+                fallback_radius = proj_shapes_list[0]["shape"].get("r", 8)
+
+            export_data["projectiles"].append({
                 "name": proj_node.properties.get("name", "Projectile"),
                 "speed": proj_node.properties.get("speed", 10.0),
                 "angle": proj_node.properties.get("angle", 0.0),
                 "gravity": proj_node.properties.get("gravity", 0.0),
                 "damage": proj_node.properties.get("damage", 1),
-                "radius": proj_node.properties.get("radius", 8),
+                "radius": fallback_radius,
                 "aim_at_player": proj_node.properties.get("aim_at_player", False),
                 "homing": proj_node.properties.get("homing", 0.0),
-                "shoot_cooldown": proj_node.properties.get("shoot_cooldown", 30)
-            }
-            export_data["projectiles"].append(proj_dict)
+                "shoot_cooldown": proj_node.properties.get("shoot_cooldown", 30),
+                "shapes": proj_shapes_list
+            })
 
+        # 13. Экспорт последовательностей (Sequences)
         for seq_node in sorted_sequences:
-            seq_shape_type = seq_node.properties.get("trig_shape_type", "rectangle")
-            seq_template = "forms.circle" if seq_shape_type == "circle" else "forms.rect"
-            seq_shape = {
-                "template": seq_template,
-                "type": seq_shape_type
+            trig_shapes_list = []
+            trig_pin = seq_node.properties.get("trig_pin")
+            for _, (p_out, p_in) in self.links_data.items():
+                if p_out == trig_pin:
+                    hb_node_id = self.pin_to_node.get(p_in)
+                    if hb_node_id and self.nodes_data[hb_node_id].type == "Hitbox":
+                        hb = self.nodes_data[hb_node_id]
+                        stype = hb.properties.get("shape_type", "rectangle")
+                        trig_shapes_list.append({
+                            "shape": {
+                                "template": hb.properties.get("shape_template", "forms.rect"),
+                                "type": stype,
+                                **({"r": hb.properties.get("r", 45)} if stype == "circle" else {"w": hb.properties.get("w", 90), "h": hb.properties.get("h", 50)})
+                            },
+                            "offset_x": hb.properties.get("offset_x", 10),
+                            "offset_y": hb.properties.get("offset_y", 0),
+                            "angle": hb.properties.get("angle", 0),
+                            "type": hb.properties.get("sprite_dir", "following")
+                        })
+
+            fallback_tz = {
+                "shape": trig_shapes_list[0]["shape"] if trig_shapes_list else {"template": "forms.rect", "w": 90, "h": 50},
+                "offset_x": trig_shapes_list[0]["offset_x"] if trig_shapes_list else 10,
+                "offset_y": trig_shapes_list[0]["offset_y"] if trig_shapes_list else 0,
+                "type": trig_shapes_list[0]["type"] if trig_shapes_list else "following",
+                "hold_time": seq_node.properties.get("trig_hold_time", 0),
+                "consecutive_limit": seq_node.properties.get("trig_consecutive_limit", 3),
+                "accumulate_hold": seq_node.properties.get("trig_accumulate_hold", True)
             }
-            if seq_shape_type == "circle":
-                seq_shape["r"] = seq_node.properties.get("trig_r", 45)
-            else:
-                seq_shape["w"] = seq_node.properties.get("trig_w", 90)
-                seq_shape["h"] = seq_node.properties.get("trig_h", 50)
 
             seq_dict = {
                 "name": seq_node.properties.get("name", "Sequence"),
                 "chance": seq_node.properties.get("chance", 0.5),
                 "cooldown": seq_node.properties.get("cooldown", 120),
                 "post_cooldown": seq_node.properties.get("post_cooldown", 30),
-                "trigger_zone": {
-                    "shape": seq_shape,
-                    "offset_x": seq_node.properties.get("trig_offset_x", 10),
-                    "offset_y": seq_node.properties.get("trig_offset_y", 0),
-                    "type": seq_node.properties.get("trig_type", "following"),
-                    "hold_time": seq_node.properties.get("trig_hold_time", 0),
-                    "consecutive_limit": seq_node.properties.get("trig_consecutive_limit", 3),
-                    "accumulate_hold": seq_node.properties.get("trig_accumulate_hold", True)
-                },
+                "trigger_zone": fallback_tz,
+                "trigger_shapes": trig_shapes_list,
                 "steps": []
             }
             if "color" in seq_node.properties:
@@ -3662,33 +4085,45 @@ class NodeEditorIOMixin:
             seq_dict["steps"].sort(key=lambda x: x["delay"])
             export_data["sequences"].append(seq_dict)
 
+        # 14. Экспорт потоков поведения (Flows)
         for flow_node in sorted_flows:
-            flow_shape_type = flow_node.properties.get("trig_shape_type", "rectangle")
-            flow_template = "forms.circle" if flow_shape_type == "circle" else "forms.rect"
-            flow_shape = {
-                "template": flow_template,
-                "type": flow_shape_type
+            trig_shapes_list = []
+            trig_pin = flow_node.properties.get("trig_pin")
+            for _, (p_out, p_in) in self.links_data.items():
+                if p_out == trig_pin:
+                    hb_node_id = self.pin_to_node.get(p_in)
+                    if hb_node_id and self.nodes_data[hb_node_id].type == "Hitbox":
+                        hb = self.nodes_data[hb_node_id]
+                        stype = hb.properties.get("shape_type", "rectangle")
+                        trig_shapes_list.append({
+                            "shape": {
+                                "template": hb.properties.get("shape_template", "forms.rect"),
+                                "type": stype,
+                                **({"r": hb.properties.get("r", 80)} if stype == "circle" else {"w": hb.properties.get("w", 250), "h": hb.properties.get("h", 80)})
+                            },
+                            "offset_x": hb.properties.get("offset_x", 0),
+                            "offset_y": hb.properties.get("offset_y", 0),
+                            "angle": hb.properties.get("angle", 0),
+                            "type": hb.properties.get("sprite_dir", "following")
+                        })
+
+            fallback_tz = {
+                "shape": trig_shapes_list[0]["shape"] if trig_shapes_list else {"template": "forms.rect", "w": 250, "h": 80},
+                "offset_x": trig_shapes_list[0]["offset_x"] if trig_shapes_list else 0,
+                "offset_y": trig_shapes_list[0]["offset_y"] if trig_shapes_list else 0,
+                "type": trig_shapes_list[0]["type"] if trig_shapes_list else "following",
+                "hold_time": flow_node.properties.get("trig_hold_time", 0),
+                "consecutive_limit": flow_node.properties.get("trig_consecutive_limit", 3),
+                "accumulate_hold": flow_node.properties.get("trig_accumulate_hold", True)
             }
-            if flow_shape_type == "circle":
-                flow_shape["r"] = flow_node.properties.get("trig_r", 80)
-            else:
-                flow_shape["w"] = flow_node.properties.get("trig_w", 250)
-                flow_shape["h"] = flow_node.properties.get("trig_h", 80)
 
             flow_dict = {
                 "name": flow_node.properties.get("name", "Flow"),
                 "chance": flow_node.properties.get("chance", 0.5),
                 "cooldown": flow_node.properties.get("cooldown", 180),
                 "post_cooldown": flow_node.properties.get("post_cooldown", 30),
-                "trigger_zone": {
-                    "shape": flow_shape,
-                    "offset_x": flow_node.properties.get("trig_offset_x", 0),
-                    "offset_y": flow_node.properties.get("trig_offset_y", 0),
-                    "type": flow_node.properties.get("trig_type", "following"),
-                    "hold_time": flow_node.properties.get("trig_hold_time", 0),
-                    "consecutive_limit": flow_node.properties.get("trig_consecutive_limit", 3),
-                    "accumulate_hold": flow_node.properties.get("trig_accumulate_hold", True)
-                },
+                "trigger_zone": fallback_tz,
+                "trigger_shapes": trig_shapes_list,
                 "steps": []
             }
             if "color" in flow_node.properties:
@@ -3721,36 +4156,48 @@ class NodeEditorIOMixin:
             flow_dict["steps"].sort(key=lambda x: x["delay"])
             export_data["flows"].append(flow_dict)
 
+        # 15. Экспорт цепочек порядка (Orders)
         for node_id, node in self.nodes_data.items():
             if node.type == "Order":
-                pos = dpg.get_item_pos(node_id)
-                order_shape_type = node.properties.get("trig_shape_type", "rectangle")
-                order_template = "forms.circle" if order_shape_type == "circle" else "forms.rect"
-                order_shape = {
-                    "template": order_template,
-                    "type": order_shape_type
-                }
-                if order_shape_type == "circle":
-                    order_shape["r"] = node.properties.get("trig_r", 75)
-                else:
-                    order_shape["w"] = node.properties.get("trig_w", 150)
-                    order_shape["h"] = node.properties.get("trig_h", 60)
+                trig_shapes_list = []
+                trig_pin = node.properties.get("trig_pin")
+                for _, (p_out, p_in) in self.links_data.items():
+                    if p_out == trig_pin:
+                        hb_node_id = self.pin_to_node.get(p_in)
+                        if hb_node_id and self.nodes_data[hb_node_id].type == "Hitbox":
+                            hb = self.nodes_data[hb_node_id]
+                            stype = hb.properties.get("shape_type", "rectangle")
+                            trig_shapes_list.append({
+                                "shape": {
+                                    "template": hb.properties.get("shape_template", "forms.rect"),
+                                    "type": stype,
+                                    **({"r": hb.properties.get("r", 75)} if stype == "circle" else {"w": hb.properties.get("w", 150), "h": hb.properties.get("h", 60)})
+                                },
+                                "offset_x": hb.properties.get("offset_x", 0),
+                                "offset_y": hb.properties.get("offset_y", 0),
+                                "angle": hb.properties.get("angle", 0),
+                                "type": hb.properties.get("sprite_dir", "following")
+                            })
 
+                fallback_tz = {
+                    "shape": trig_shapes_list[0]["shape"] if trig_shapes_list else {"template": "forms.rect", "w": 150, "h": 60},
+                    "offset_x": trig_shapes_list[0]["offset_x"] if trig_shapes_list else 0,
+                    "offset_y": trig_shapes_list[0]["offset_y"] if trig_shapes_list else 0,
+                    "type": trig_shapes_list[0]["type"] if trig_shapes_list else "following",
+                    "hold_time": node.properties.get("trig_hold_time", 0),
+                    "consecutive_limit": node.properties.get("trig_consecutive_limit", 3),
+                    "accumulate_hold": node.properties.get("trig_accumulate_hold", True)
+                }
+
+                pos = dpg.get_item_pos(node_id)
                 order_dict = {
                     "name": node.properties.get("name", "Order"),
                     "pos": pos,
                     "chance": node.properties.get("chance", 1.0),
                     "cooldown": node.properties.get("cooldown", 120),
                     "post_cooldown": node.properties.get("post_cooldown", 30),
-                    "trigger_zone": {
-                        "shape": order_shape,
-                        "offset_x": node.properties.get("trig_offset_x", 0),
-                        "offset_y": node.properties.get("trig_offset_y", 0),
-                        "type": node.properties.get("trig_type", "following"),
-                        "hold_time": node.properties.get("trig_hold_time", 0),
-                        "consecutive_limit": node.properties.get("trig_consecutive_limit", 3),
-                        "accumulate_hold": node.properties.get("trig_accumulate_hold", True)
-                    },
+                    "trigger_zone": fallback_tz,
+                    "trigger_shapes": trig_shapes_list,
                     "steps": []
                 }
                 for pin_id in node.properties.get("steps_pins", []):
@@ -3819,6 +4266,30 @@ class NodeEditorNodesMixin:
         self.pins_registry[p_seqs] = {"node_id": node_id, "type": "Exec", "direction": "Output"}
         self.pin_to_node[p_seqs] = node_id
 
+        # Новые универсальные пины хитбоксов для Root (Тело)
+        p_body = dpg.add_node_attribute(parent=node_id, attribute_type=dpg.mvNode_Attr_Output)
+        dpg.add_text("Body shapes (Component)", parent=p_body)
+        node.output_pins[p_body] = PinData(p_body, "Output", "Body", "Component")
+        self.pins_registry[p_body] = {"node_id": node_id, "type": "Component", "direction": "Output"}
+        self.pin_to_node[p_body] = node_id
+        properties["body_pin"] = p_body
+
+        # Зрение (Детекция)
+        p_det = dpg.add_node_attribute(parent=node_id, attribute_type=dpg.mvNode_Attr_Output)
+        dpg.add_text("Detection shapes (Component)", parent=p_det)
+        node.output_pins[p_det] = PinData(p_det, "Output", "Detection", "Component")
+        self.pins_registry[p_det] = {"node_id": node_id, "type": "Component", "direction": "Output"}
+        self.pin_to_node[p_det] = node_id
+        properties["det_pin"] = p_det
+
+        # Новые пины хитбоксов остановки для Root
+        p_stop = dpg.add_node_attribute(parent=node_id, attribute_type=dpg.mvNode_Attr_Output)
+        dpg.add_text("Stopping shapes (Component)", parent=p_stop)
+        node.output_pins[p_stop] = PinData(p_stop, "Output", "Stopping", "Component")
+        self.pins_registry[p_stop] = {"node_id": node_id, "type": "Component", "direction": "Output"}
+        self.pin_to_node[p_stop] = node_id
+        properties["stop_pin"] = p_stop
+
         self.nodes_data[node_id] = node
         dpg.bind_item_theme(node_id, self.root_theme)
         return node_id
@@ -3844,6 +4315,14 @@ class NodeEditorNodesMixin:
         self.pins_registry[p_order] = {"node_id": node_id, "type": "Order", "direction": "Output"}
         self.pin_to_node[p_order] = node_id
         properties["order_pin"] = p_order
+
+        # Новый пин триггера для Flow
+        p_trig = dpg.add_node_attribute(parent=node_id, attribute_type=dpg.mvNode_Attr_Output)
+        dpg.add_text("Trigger zone (Component)", parent=p_trig)
+        node.output_pins[p_trig] = PinData(p_trig, "Output", "Trigger Zone", "Component")
+        self.pins_registry[p_trig] = {"node_id": node_id, "type": "Component", "direction": "Output"}
+        self.pin_to_node[p_trig] = node_id
+        properties["trig_pin"] = p_trig
 
         self.nodes_data[node_id] = node
         dpg.bind_item_theme(node_id, self.flow_theme)
@@ -3875,6 +4354,14 @@ class NodeEditorNodesMixin:
         self.pins_registry[p_order] = {"node_id": node_id, "type": "Order", "direction": "Output"}
         self.pin_to_node[p_order] = node_id
         properties["order_pin"] = p_order
+
+        # Новый пин триггера для Sequence
+        p_trig = dpg.add_node_attribute(parent=node_id, attribute_type=dpg.mvNode_Attr_Output)
+        dpg.add_text("Trigger zone (Component)", parent=p_trig)
+        node.output_pins[p_trig] = PinData(p_trig, "Output", "Trigger Zone", "Component")
+        self.pins_registry[p_trig] = {"node_id": node_id, "type": "Component", "direction": "Output"}
+        self.pin_to_node[p_trig] = node_id
+        properties["trig_pin"] = p_trig
 
         self.nodes_data[node_id] = node
         dpg.bind_item_theme(node_id, self.sequence_theme)
@@ -3940,6 +4427,14 @@ class NodeEditorNodesMixin:
         self.pins_registry[p_out] = {"node_id": node_id, "type": "Component", "direction": "Output"}
         self.pin_to_node[p_out] = node_id
 
+        # Новый пин области остановки для Movement
+        p_stop = dpg.add_node_attribute(parent=node_id, attribute_type=dpg.mvNode_Attr_Output)
+        dpg.add_text("Stop Area (Component)", parent=p_stop)
+        node.output_pins[p_stop] = PinData(p_stop, "Output", "Stop Area", "Component")
+        self.pins_registry[p_stop] = {"node_id": node_id, "type": "Component", "direction": "Output"}
+        self.pin_to_node[p_stop] = node_id
+        properties["stop_pin"] = p_stop
+
         self.nodes_data[node_id] = node
         dpg.bind_item_theme(node_id, self.movement_theme)
         return node_id
@@ -3970,6 +4465,14 @@ class NodeEditorNodesMixin:
         node.input_pins[p_in] = PinData(p_in, "Input", "Activate", "Exec")
         self.pins_registry[p_in] = {"node_id": node_id, "type": "Exec", "direction": "Input"}
         self.pin_to_node[p_in] = node_id
+
+        # Новый пин хитбоксов снаряда
+        p_out = dpg.add_node_attribute(parent=node_id, attribute_type=dpg.mvNode_Attr_Output)
+        dpg.add_text("Hitboxes (Component)", parent=p_out)
+        node.output_pins[p_out] = PinData(p_out, "Output", "Hitboxes", "Component")
+        self.pins_registry[p_out] = {"node_id": node_id, "type": "Component", "direction": "Output"}
+        self.pin_to_node[p_out] = node_id
+        properties["hitbox_pin"] = p_out
 
         self.nodes_data[node_id] = node
         dpg.bind_item_theme(node_id, self.projectile_theme)
@@ -4035,6 +4538,14 @@ class NodeEditorNodesMixin:
         dpg.add_button(label="-", width=30, callback=self._on_remove_order_step_click, user_data=node_id, parent=group_id)
         dpg.add_text("Steps Control", parent=group_id)
 
+        # Новый пин триггера для Order
+        p_trig = dpg.add_node_attribute(parent=node_id, attribute_type=dpg.mvNode_Attr_Output)
+        dpg.add_text("Trigger zone (Component)", parent=p_trig)
+        node.output_pins[p_trig] = PinData(p_trig, "Output", "Trigger Zone", "Component")
+        self.pins_registry[p_trig] = {"node_id": node_id, "type": "Component", "direction": "Output"}
+        self.pin_to_node[p_trig] = node_id
+        properties["trig_pin"] = p_trig
+
         self.nodes_data[node_id] = node
         dpg.bind_item_theme(node_id, self.order_theme)
         return node_id
@@ -4042,7 +4553,7 @@ class NodeEditorNodesMixin:
     def add_order_step(self, node_id):
         node = self.nodes_data[node_id]
         steps_list = node.properties.setdefault("steps_pins", [])
-        step_index = len(steps_list) + 1  # 1-based index
+        step_index = len(steps_list) + 1
 
         pin_label = f"Step {step_index}"
 
@@ -4084,14 +4595,12 @@ class NodeEditorNodesMixin:
 import dearpygui.dearpygui as dpg
 import math
 
-# Вспомогательный хелпер для безопасного приведения типов на холсте предпросмотра
 def safe_num(val, default=0):
     if val is None:
         return default
     if isinstance(val, (int, float)):
         return val
     if isinstance(val, str):
-        # Игнорируем неразрешенные шаблоны
         if val.startswith("$"):
             return default
         try:
@@ -4143,7 +4652,6 @@ class NodeEditorPreviewMixin:
         if not order_pin:
             return False
 
-        # Проверяем, соединен ли этот pin с узлом типа Order в списке активных связей
         for lid, (p_out, p_in) in self.links_data.items():
             if p_out == order_pin:
                 target_reg = self.pins_registry.get(p_in)
@@ -4151,123 +4659,188 @@ class NodeEditorPreviewMixin:
                     return True
         return False
 
-    def get_node_shape_info(self, node, ex, ey, body_w, body_h, is_vis_box=False):
-        if is_vis_box:
-            if node.type == "Hitbox" and node.properties.get("vis_enabled", False):
-                shape_type = node.properties.get("vis_type", "rectangle")
-                w = safe_num(node.properties.get("vis_w"), 50)
-                h = safe_num(node.properties.get("vis_h"), 40)
-                r = safe_num(node.properties.get("vis_r"), 25)
-                offset_x = safe_num(node.properties.get("vis_offset_x"), 0)
-                offset_y = safe_num(node.properties.get("vis_offset_y"), 0)
-                angle = 0.0
-                det_type = "following"
-            else:
-                return None
-        else:
-            shape_type = None
-            w, h, r = 0, 0, 0
-            offset_x, offset_y = 0, 0
-            angle = 0.0
+    def is_hitbox_connected_to_node(self, hb_id, parent_id):
+        if hb_id == parent_id:
+            return True
+        hb_node = self.nodes_data.get(hb_id)
+        if not hb_node or not hb_node.input_pins:
+            return False
+        p_in = list(hb_node.input_pins.keys())[0]
+        for _, (p_out, p_in_link) in self.links_data.items():
+            if p_in_link == p_in:
+                src_node_id = self.pin_to_node.get(p_out)
+                if src_node_id == parent_id:
+                    return True
+        return False
+
+    def is_hitbox_linked_to_any_parent(self, hb_id):
+        hb_node = self.nodes_data.get(hb_id)
+        if not hb_node or not hb_node.input_pins:
+            return False
+        p_in_hb = list(hb_node.input_pins.keys())[0]
+        for _, (p_out, p_in) in self.links_data.items():
+            if p_in == p_in_hb:
+                return True
+        return False
+
+    def get_node_shapes_info(self, node, ex, ey, body_w, body_h, zoom):
+        shapes_info = []
+
+        if node.type == "Root":
+            # хитбоксы тела врага
+            body_pin = node.properties.get("body_pin")
+            if body_pin:
+                for _, (p_out, p_in) in self.links_data.items():
+                    if p_out == body_pin:
+                        hb_id = self.pin_to_node.get(p_in)
+                        if hb_id and self.nodes_data.get(hb_id):
+                            shapes_info.append(self._get_hitbox_geom(self.nodes_data[hb_id], ex, ey, body_w, body_h, zoom, "body"))
+
+            # хитбоксы детекции (зрения)
+            det_pin = node.properties.get("det_pin")
+            if det_pin:
+                for _, (p_out, p_in) in self.links_data.items():
+                    if p_out == det_pin:
+                        hb_id = self.pin_to_node.get(p_in)
+                        if hb_id and self.nodes_data.get(hb_id):
+                            shapes_info.append(self._get_hitbox_geom(self.nodes_data[hb_id], ex, ey, body_w, body_h, zoom, "detection"))
+
+            # универсальные хитбоксы остановки (stopping shapes)
+            stop_pin = node.properties.get("stop_pin")
+            if stop_pin:
+                for _, (p_out, p_in) in self.links_data.items():
+                    if p_out == stop_pin:
+                        hb_id = self.pin_to_node.get(p_in)
+                        if hb_id and self.nodes_data.get(hb_id):
+                            shapes_info.append(self._get_hitbox_geom(self.nodes_data[hb_id], ex, ey, body_w, body_h, zoom, "movement_stop"))
+
+        elif node.type in ("Flow", "Sequence", "Order"):
+            trig_pin = node.properties.get("trig_pin")
+            category_map = {"Flow": "flow_trigger", "Sequence": "sequence_trigger", "Order": "order_trigger"}
+            category = category_map.get(node.type, "trigger")
+            if trig_pin:
+                for _, (p_out, p_in) in self.links_data.items():
+                    if p_out == trig_pin:
+                        hb_id = self.pin_to_node.get(p_in)
+                        if hb_id and self.nodes_data.get(hb_id):
+                            shapes_info.append(self._get_hitbox_geom(self.nodes_data[hb_id], ex, ey, body_w, body_h, zoom, category))
+
+        elif node.type == "Projectile":
+            hitbox_pin = node.properties.get("hitbox_pin")
+            if hitbox_pin:
+                for _, (p_out, p_in) in self.links_data.items():
+                    if p_out == hitbox_pin:
+                        hb_id = self.pin_to_node.get(p_in)
+                        if hb_id and self.nodes_data.get(hb_id):
+                            shapes_info.append(self._get_hitbox_geom(self.nodes_data[hb_id], ex, ey, body_w, body_h, zoom, "projectile"))
+
+        elif node.type == "Movement":
+            stop_pin = node.properties.get("stop_pin")
+            if stop_pin:
+                for _, (p_out, p_in) in self.links_data.items():
+                    if p_out == stop_pin:
+                        hb_id = self.pin_to_node.get(p_in)
+                        if hb_id and self.nodes_data.get(hb_id):
+                            shapes_info.append(self._get_hitbox_geom(self.nodes_data[hb_id], ex, ey, body_w, body_h, zoom, "movement_stop"))
+
+        elif node.type == "Attack":
+            p_out_atk = list(node.output_pins.keys())[0] if node.output_pins else None
+            if p_out_atk:
+                for _, (p_out, p_in) in self.links_data.items():
+                    if p_out == p_out_atk:
+                        hb_id = self.pin_to_node.get(p_in)
+                        if hb_id and self.nodes_data.get(hb_id) and self.nodes_data[hb_id].type == "Hitbox":
+                            shapes_info.append(self._get_hitbox_geom(self.nodes_data[hb_id], ex, ey, body_w, body_h, zoom, "attack"))
+
+        elif node.type == "Hitbox":
+            if not self.is_hitbox_linked_to_any_parent(node.id):
+                shapes_info.append(self._get_hitbox_geom(node, ex, ey, body_w, body_h, zoom, "attack"))
+
+        return [s for s in shapes_info if s is not None]
+
+    def _get_hitbox_geom(self, hb, ex, ey, body_w, body_h, zoom, category):
+        shape_type = hb.properties.get("shape_type", "rectangle")
+        w = safe_num(hb.properties.get("w"), 50)
+        h = safe_num(hb.properties.get("h"), 40)
+        r = safe_num(hb.properties.get("r"), 25)
+        offset_x = safe_num(hb.properties.get("offset_x"), 0)
+        offset_y = safe_num(hb.properties.get("offset_y"), 0)
+        angle = safe_num(hb.properties.get("angle"), 0.0)
+
+        if category in ("attack", "projectile"):
             det_type = "following"
+        elif category in ("body", "movement_stop"):
+            det_type = "stationary"
+        else:
+            det_type = hb.properties.get("sprite_dir", "following")
 
-            if node.type == "Root":
-                shape_type = node.properties.get("det_shape_type", "rectangle")
-                w = safe_num(node.properties.get("det_w"), 220)
-                h = safe_num(node.properties.get("det_h"), 70)
-                r = safe_num(node.properties.get("det_r"), 110)
-                offset_x = safe_num(node.properties.get("det_offset_x"), 0)
-                offset_y = safe_num(node.properties.get("det_offset_y"), -10)
-                angle = safe_num(node.properties.get("det_angle"), 0.0)
-                det_type = node.properties.get("det_type", "following")
-            elif node.type in ("Flow", "Sequence"):
-                shape_type = node.properties.get("trig_shape_type", "rectangle")
-                w = safe_num(node.properties.get("trig_w"), 90)
-                h = safe_num(node.properties.get("trig_h"), 50)
-                r = safe_num(node.properties.get("trig_r"), 45)
-                offset_x = safe_num(node.properties.get("trig_offset_x"), 10)
-                offset_y = safe_num(node.properties.get("trig_offset_y"), 0)
-                angle = 0.0
-                det_type = node.properties.get("trig_type", "following")
-            elif node.type == "Order":
-                shape_type = node.properties.get("trig_shape_type", "rectangle")
-                w = safe_num(node.properties.get("trig_w"), 150)
-                h = safe_num(node.properties.get("trig_h"), 60)
-                r = safe_num(node.properties.get("trig_r"), 75)
-                offset_x = safe_num(node.properties.get("trig_offset_x"), 0)
-                offset_y = safe_num(node.properties.get("trig_offset_y"), 0)
-                angle = 0.0
-                det_type = node.properties.get("trig_type", "following")
-            elif node.type == "Hitbox":
-                shape_type = node.properties.get("shape_type", "rectangle")
-                w = safe_num(node.properties.get("w"), 50)
-                h = safe_num(node.properties.get("h"), 40)
-                r = safe_num(node.properties.get("r"), 25)
-                offset_x = safe_num(node.properties.get("offset_x"), 10)
-                offset_y = safe_num(node.properties.get("offset_y"), 0)
-                angle = safe_num(node.properties.get("angle"), 0.0)
-                det_type = "following"
-            else:
-                return None
+        rx_left = ex - (safe_num(body_w, 30) * zoom) / 2.0
+        rx_right = ex + (safe_num(body_w, 30) * zoom) / 2.0
+        ry_top = ey - (safe_num(body_h, 50) * zoom) / 2.0
 
-        rx_left = ex - safe_num(body_w, 30) / 2
-        rx_right = ex + safe_num(body_w, 30) / 2
-        ry_top = ey - safe_num(body_h, 50) / 2
+        scaled_offset_x = offset_x * zoom
+        scaled_offset_y = offset_y * zoom
+        scaled_r = r * zoom
+        scaled_w = w * zoom
+        scaled_h = h * zoom
 
         if det_type == "following":
             if shape_type == "circle":
-                cx_shape = rx_right + offset_x + r
-                cy_shape = ry_top + offset_y + r
+                cx_shape = rx_right + scaled_offset_x + scaled_r
+                cy_shape = ry_top + scaled_offset_y + scaled_r
             else:
-                cx_shape = rx_right + offset_x + w / 2
-                cy_shape = ry_top + offset_y + h / 2
-        else:  # stationary
+                cx_shape = rx_right + scaled_offset_x + scaled_w / 2.0
+                cy_shape = ry_top + scaled_offset_y + scaled_h / 2.0
+        else: # stationary
             if shape_type == "circle":
-                cx_shape = rx_left + offset_x + r
-                cy_shape = ry_top + offset_y + r
+                cx_shape = rx_left + scaled_offset_x + scaled_r
+                cy_shape = ry_top + scaled_offset_y + scaled_r
             else:
-                cx_shape = rx_left + offset_x + w / 2
-                cy_shape = ry_top + offset_y + h / 2
+                cx_shape = rx_left + scaled_offset_x + scaled_w / 2.0
+                cy_shape = ry_top + scaled_offset_y + scaled_h / 2.0
 
-        return (shape_type, w, h, r, offset_x, offset_y, angle, det_type, cx_shape, cy_shape)
+        return (shape_type, scaled_w, scaled_h, scaled_r, offset_x, offset_y, angle, det_type, cx_shape, cy_shape, hb, category)
 
-    def draw_node_preview_shape(self, node, is_focused, ex, ey, body_w, body_h, is_vis_box=False):
-        info = self.get_node_shape_info(node, ex, ey, body_w, body_h, is_vis_box=is_vis_box)
-        if not info:
-            return
+    def draw_node_preview_shape(self, shape_info, is_focused):
+        shape_type, scaled_w, scaled_h, scaled_r, offset_x, offset_y, angle, det_type, cx_shape, cy_shape = shape_info[:10]
+        hb_node = shape_info[10] if len(shape_info) > 10 else None
+        category = shape_info[11] if len(shape_info) > 11 else "attack"
 
-        shape_type, w, h, r, offset_x, offset_y, angle, det_type, cx_shape, cy_shape = info
+        alpha = 140 if is_focused else 20
+        border_alpha = 255 if is_focused else 90
 
-        alpha = 140 if is_focused else 35
-        border_alpha = 255 if is_focused else 70
-
-        if is_vis_box:
-            fill = [180, 100, 255, alpha]
-            border = [180, 100, 255, border_alpha]
-        elif node.type == "Root":
-            fill = [255, 220, 0, alpha]
+        if category == "body":
+            fill = [110, 110, 125, alpha]
+            border = [80, 80, 95, border_alpha]
+        elif category == "detection":
+            fill = [255, 220, 0, min(alpha, 15)]
             border = [255, 220, 0, border_alpha]
-        elif node.type == "Flow":
-            fill = [0, 200, 255, alpha]
-            border = [0, 200, 255, border_alpha]
-        elif node.type == "Sequence":
-            fill = [255, 100, 0, alpha]
+        elif category == "sequence_trigger":
+            fill = [255, 100, 0, min(alpha, 15)]
             border = [255, 100, 0, border_alpha]
-        elif node.type == "Order":
-            fill = [180, 50, 255, alpha]
+        elif category == "flow_trigger":
+            fill = [0, 200, 255, min(alpha, 15)]
+            border = [0, 200, 255, border_alpha]
+        elif category == "order_trigger":
+            fill = [180, 50, 255, min(alpha, 15)]
             border = [180, 50, 255, border_alpha]
-        elif node.type == "Hitbox":
-            fill = [255, 60, 60, alpha]
+        elif category == "projectile":
+            fill = [105, 55, 140, min(alpha, 25)]
+            border = [105, 55, 140, border_alpha]
+        elif category == "movement_stop":
+            # Хитбоксы остановки отрисовываем зелеными тонами
+            fill = [0, 255, 100, min(alpha, 15)]
+            border = [0, 200, 80, border_alpha]
+        else: # attack
+            fill = [255, 60, 60, min(alpha, 30)]
             border = [255, 60, 60, border_alpha]
-        else:
-            return
 
         thickness = 2 if is_focused else 1
 
         if shape_type == "circle":
             dpg.draw_circle(
                 center=[cx_shape, cy_shape],
-                radius=r,
+                radius=scaled_r,
                 fill=fill,
                 color=border,
                 thickness=thickness,
@@ -4276,7 +4849,7 @@ class NodeEditorPreviewMixin:
         else:
             rad = math.radians(-angle)
             cos_a, sin_a = math.cos(rad), math.sin(rad)
-            dx, dy = w / 2, h / 2
+            dx, dy = scaled_w / 2.0, scaled_h / 2.0
             corners = []
             for px, py in [(-dx, -dy), (dx, -dy), (dx, dy), (-dx, dy)]:
                 rx = px * cos_a - py * sin_a + cx_shape
@@ -4315,15 +4888,15 @@ class NodeEditorPreviewMixin:
                 dpg.draw_circle(center=[cx_shape, cy_shape], radius=3, fill=white_color, parent="preview_drawlist")
 
             elif shape_type == "circle":
-                dpg.draw_circle(center=[cx_shape, cy_shape], radius=r, color=handle_color, thickness=2, parent="preview_drawlist")
-                dpg.draw_circle(center=[cx_shape, cy_shape], radius=0.8 * r, color=[0, 240, 255, 120], thickness=1, parent="preview_drawlist")
+                dpg.draw_circle(center=[cx_shape, cy_shape], radius=scaled_r, color=handle_color, thickness=2, parent="preview_drawlist")
+                dpg.draw_circle(center=[cx_shape, cy_shape], radius=0.8 * scaled_r, color=[0, 240, 255, 120], thickness=1, parent="preview_drawlist")
 
                 for ang_deg in [0, 90, 180, 270]:
                     rad_ang = math.radians(ang_deg)
-                    hx = cx_shape + r * math.cos(rad_ang)
-                    hy = cy_shape + r * math.sin(rad_ang)
+                    hx = cx_shape + scaled_r * math.cos(rad_ang)
+                    hy = cy_shape + scaled_r * math.sin(rad_ang)
                     dpg.draw_line(
-                        p1=[cx_shape + 0.8 * r * math.cos(rad_ang), cy_shape + 0.8 * r * math.sin(rad_ang)],
+                        p1=[cx_shape + 0.8 * scaled_r * math.cos(rad_ang), cy_shape + 0.8 * scaled_r * math.sin(rad_ang)],
                         p2=[hx, hy],
                         color=[0, 240, 255, 200],
                         thickness=1.5,
@@ -4333,75 +4906,37 @@ class NodeEditorPreviewMixin:
 
                 dpg.draw_circle(center=[cx_shape, cy_shape], radius=3, fill=white_color, parent="preview_drawlist")
 
-        if not is_vis_box and node.type == "Hitbox" and node.properties.get("vis_enabled", False):
-            self.draw_node_preview_shape(node, False, ex, ey, body_w, body_h, is_vis_box=True)
-
-    def set_node_shape_properties(self, node, updates, is_vis_box=False):
-        if is_vis_box and node.type == "Hitbox":
-            if "offset_x" in updates: node.properties["vis_offset_x"] = int(updates["offset_x"])
-            if "offset_y" in updates: node.properties["vis_offset_y"] = int(updates["offset_y"])
-            if "w" in updates: node.properties["vis_w"] = int(updates["vis_w"] if "vis_w" in updates else updates["w"])
-            if "h" in updates: node.properties["vis_h"] = int(updates["vis_h"] if "vis_h" in updates else updates["h"])
-            if "r" in updates: node.properties["vis_r"] = int(updates["vis_r"] if "vis_r" in updates else updates["r"])
-            return
-
-        if node.type == "Root":
-            if "offset_x" in updates: node.properties["det_offset_x"] = int(updates["offset_x"])
-            if "offset_y" in updates: node.properties["det_offset_y"] = int(updates["offset_y"])
-            if "w" in updates: node.properties["det_w"] = int(updates["w"])
-            if "h" in updates: node.properties["det_h"] = int(updates["h"])
-            if "r" in updates: node.properties["det_r"] = int(updates["r"])
-            if "angle" in updates: node.properties["det_angle"] = float(updates["angle"])
-        elif node.type in ("Flow", "Sequence"):
-            if "offset_x" in updates: node.properties["trig_offset_x"] = int(updates["offset_x"])
-            if "offset_y" in updates: node.properties["trig_offset_y"] = int(updates["offset_y"])
-            if "w" in updates: node.properties["trig_w"] = int(updates["w"])
-            if "h" in updates: node.properties["trig_h"] = int(updates["h"])
-            if "r" in updates: node.properties["trig_r"] = int(updates["r"])
-        elif node.type == "Order":
-            if "offset_x" in updates: node.properties["trig_offset_x"] = int(updates["offset_x"])
-            if "offset_y" in updates: node.properties["trig_offset_y"] = int(updates["offset_y"])
-            if "w" in updates: node.properties["trig_w"] = int(updates["w"])
-            if "h" in updates: node.properties["trig_h"] = int(updates["h"])
-            if "r" in updates: node.properties["trig_r"] = int(updates["r"])
-        elif node.type == "Hitbox":
-            if "offset_x" in updates: node.properties["offset_x"] = int(updates["offset_x"])
-            if "offset_y" in updates: node.properties["offset_y"] = int(updates["offset_y"])
-            if "w" in updates: node.properties["w"] = int(updates["w"])
-            if "h" in updates: node.properties["h"] = int(updates["h"])
-            if "r" in updates: node.properties["r"] = int(updates["r"])
-            if "angle" in updates: node.properties["angle"] = float(updates["angle"])
-
     def _hit_test_shape(self, info, mx, my):
-        shape_type, w, h, r, offset_x, offset_y, angle, det_type, cx_shape, cy_shape = info
+        shape_type, scaled_w, scaled_h, scaled_r, offset_x, offset_y, angle, det_type, cx_shape, cy_shape = info[:10]
 
         if shape_type == "circle":
             dist = math.hypot(mx - cx_shape, my - cy_shape)
-            if dist <= r + 8:
-                if dist >= 0.7 * r:
+            if dist <= scaled_r + 8:
+                if dist >= 0.75 * scaled_r:
                     return "resize_circle"
                 else:
                     return "move"
             return None
-        else:  # rectangle
-            rad = math.radians(-angle)
-            cos_a, sin_a = math.cos(rad), math.sin(rad)
+        else: # rectangle
+            rad = math.radians(angle)
             dx = mx - cx_shape
             dy = my - cy_shape
-            rx_local = dx * cos_a - dy * sin_a + cx_shape
-            ry_local = dx * sin_a + dy * cos_a + cy_shape
+            rx_local = dx * math.cos(rad) - dy * math.sin(rad) + cx_shape
+            ry_local = dx * math.sin(rad) + dy * math.cos(rad) + cy_shape
 
-            half_w, half_h = w / 2, h / 2
+            half_w, half_h = scaled_w / 2.0, scaled_h / 2.0
+            rad_fwd = math.radians(-angle)
+            cos_fwd, sin_fwd = math.cos(rad_fwd), math.sin(rad_fwd)
             corners_local = [(-half_w, -half_h), (half_w, -half_h), (half_w, half_h), (-half_w, half_h)]
             for cx_l, cy_l in corners_local:
-                c_world_x = cx_l * cos_a - cy_l * sin_a + cx_shape
-                c_world_y = cx_l * sin_a + cy_l * cos_a + cy_shape
+                c_world_x = cx_l * cos_fwd - cy_l * sin_fwd + cx_shape
+                c_world_y = cx_l * sin_fwd + cy_l * cos_fwd + cy_shape
                 if math.hypot(mx - c_world_x, my - c_world_y) <= 10:
                     return "rotate"
 
             if (cx_shape - half_w <= rx_local <= cx_shape + half_w) and (cy_shape - half_h <= ry_local <= cy_shape + half_h):
-                u = (rx_local - (cx_shape - half_w)) / w
-                v = (ry_local - (cy_shape - half_h)) / h
+                u = (rx_local - (cx_shape - half_w)) / scaled_w if scaled_w > 0 else 0.5
+                v = (ry_local - (cy_shape - half_h)) / scaled_h if scaled_h > 0 else 0.5
 
                 is_corner_zone = (u <= 0.25 or u >= 0.75) and (v <= 0.25 or v >= 0.75)
                 if is_corner_zone:
@@ -4424,14 +4959,14 @@ class NodeEditorPreviewMixin:
 
         dpg.delete_item("preview_drawlist", children_only=True)
 
-        draw_w, draw_h = 360, 270
-        current_win_size = dpg.get_item_rect_size("preview_window")
-        if current_win_size and current_win_size[0] > 10 and current_win_size[1] > 10:
-            draw_w = max(50, current_win_size[0] - 20)
-            draw_h = max(50, current_win_size[1] - 70)
-            if not hasattr(self, "last_preview_win_size") or self.last_preview_win_size != current_win_size:
-                self.last_preview_win_size = current_win_size
-                dpg.configure_item("preview_drawlist", width=draw_w, height=draw_h)
+        win_size = dpg.get_item_rect_size("preview_window")
+        win_w = win_size[0] if win_size and win_size[0] > 10 else 380
+        win_h = win_size[1] if win_size and win_size[1] > 10 else 340
+
+        draw_w = win_w - 20
+        draw_h = win_h - 80
+
+        dpg.configure_item("preview_drawlist", width=draw_w, height=draw_h)
 
         vw = dpg.get_viewport_width()
         p_width = draw_w + 20
@@ -4445,6 +4980,8 @@ class NodeEditorPreviewMixin:
         ex = cx + getattr(self, "preview_pan_x", 0.0)
         ey = cy + getattr(self, "preview_pan_y", 0.0)
 
+        zoom = dpg.get_value("preview_zoom") if dpg.does_item_exist("preview_zoom") else 0.5
+
         root_node = None
         for n in self.nodes_data.values():
             if n.type == "Root":
@@ -4454,16 +4991,62 @@ class NodeEditorPreviewMixin:
         body_w = safe_num(root_node.properties.get("body_w"), 30) if root_node else 30
         body_h = safe_num(root_node.properties.get("body_h"), 50) if root_node else 50
 
-        floor_y = ey + body_h / 2.0
+        bw = body_w * zoom
+        bh = body_h * zoom
 
+        floor_y = ey + bh / 2.0
+
+        # Линия пола
         dpg.draw_line(p1=[10, floor_y], p2=[draw_w - 10, floor_y], color=[100, 100, 100, 255], thickness=2, parent="preview_drawlist")
 
+        # Базовое тело врага
         dpg.draw_rectangle(
-            pmin=[ex - body_w / 2.0, ey - body_h / 2.0],
-            pmax=[ex + body_w / 2.0, ey + body_h / 2.0],
+            pmin=[ex - bw / 2.0, ey - bh / 2.0],
+            pmax=[ex + bw / 2.0, ey + bh / 2.0],
             fill=[110, 110, 125, 255],
             color=[80, 80, 95, 255],
             thickness=1,
+            parent="preview_drawlist"
+        )
+
+        # Голова врага
+        head_h = max(2.0, bh * 0.25)
+        dpg.draw_rectangle(
+            pmin=[ex - bw / 2.0, ey - bh / 2.0],
+            pmax=[ex + bw / 2.0, ey - bh / 2.0 + head_h],
+            fill=[80, 80, 95, 255],
+            color=[60, 60, 75, 255],
+            thickness=1,
+            parent="preview_drawlist"
+        )
+
+        # Глаз врага
+        eye_w = max(2.0, 4.0 * zoom)
+        eye_x = ex + bw / 2.0 - 6.0 * zoom
+        eye_y = ey - bh / 2.0 + 6.0 * zoom
+        dpg.draw_rectangle(
+            pmin=[eye_x, eye_y],
+            pmax=[eye_x + eye_w, eye_y + eye_w],
+            fill=[255, 255, 255, 255],
+            color=[255, 255, 255, 255],
+            parent="preview_drawlist"
+        )
+
+        # Полоска HP
+        dpg.draw_rectangle(
+            pmin=[ex - bw / 2.0, ey - bh / 2.0 - 8.0 * zoom],
+            pmax=[ex + bw / 2.0, ey - bh / 2.0 - 4.0 * zoom],
+            fill=[0, 255, 0, 255],
+            parent="preview_drawlist"
+        )
+
+        # Имя врага
+        enemy_name = root_node.properties.get("name", "Enemy") if root_node else "Enemy"
+        dpg.draw_text(
+            pos=[ex - bw / 2.0, ey - bh / 2.0 - 22.0 * zoom],
+            text=enemy_name,
+            color=[220, 220, 220, 255],
+            size=max(10, int(12 * zoom)),
             parent="preview_drawlist"
         )
 
@@ -4491,71 +5074,69 @@ class NodeEditorPreviewMixin:
 
         active_node = self.nodes_data.get(self.active_selected_node_id) if self.active_selected_node_id else None
 
-        for node in list(self.nodes_data.values()):
-            # Скрываем триггерные зоны связанных с Order последовательностей и флоу, кроме выделенного в данный момент узла
-            if node.type in ("Flow", "Sequence") and self.is_node_connected_to_order(node.id):
-                if node != active_node:
-                    continue
-            if node != active_node:
-                self.draw_node_preview_shape(node, False, ex, ey, body_w, body_h)
+        # Собираем хитбоксы всех нод
+        all_shapes = []
+        for node in self.nodes_data.values():
+            all_shapes.extend(self.get_node_shapes_info(node, ex, ey, body_w, body_h, zoom))
 
-        if active_node:
-            self.draw_node_preview_shape(active_node, True, ex, ey, body_w, body_h)
+        focused_shapes = []
+        for s in all_shapes:
+            hb_node = s[10]
+            is_focused = False
+            if active_node:
+                if hb_node == active_node or hb_node.id == active_node.id:
+                    is_focused = True
+                elif self.is_hitbox_connected_to_node(hb_node.id, active_node.id):
+                    is_focused = True
+
+            if is_focused:
+                focused_shapes.append(s)
+            else:
+                self.draw_node_preview_shape(s, False)
+
+        for s in focused_shapes:
+            self.draw_node_preview_shape(s, True)
 
         if clicked and not self.preview_dragging and not getattr(self, "preview_canvas_panning", False):
-            target_node = None
-            target_mode = "move"
-            target_info = None
-            target_is_vis = False
+            target_shape = None
+            target_mode = None
 
-            if active_node:
-                info = self.get_node_shape_info(active_node, ex, ey, body_w, body_h)
-                if info:
-                    mode = self._hit_test_shape(info, mx, my)
+            for s in focused_shapes:
+                mode = self._hit_test_shape(s, mx, my)
+                if mode:
+                    target_shape = s
+                    target_mode = mode
+                    break
+
+            if not target_shape:
+                for s in reversed(all_shapes):
+                    mode = self._hit_test_shape(s, mx, my)
                     if mode:
-                        target_node = active_node
+                        target_shape = s
                         target_mode = mode
-                        target_info = info
-                if not target_node and active_node.type == "Hitbox" and active_node.properties.get("vis_enabled", False):
-                    vis_info = self.get_node_shape_info(active_node, ex, ey, body_w, body_h, is_vis_box=True)
-                    if_mode_found = False
-                    if vis_info:
-                        mode = self._hit_test_shape(vis_info, mx, my)
-                        if mode:
-                            target_node = active_node
-                            target_mode = mode
-                            target_info = vis_info
-                            target_is_vis = True
+                        break
 
-            if not target_node:
-                for node in reversed(list(self.nodes_data.values())):
-                    # Пропускаем связанные последовательности при поиске клика для предпросмотра
-                    if node.type in ("Flow", "Sequence") and self.is_node_connected_to_order(node.id):
-                        continue
-                    info = self.get_node_shape_info(node, ex, ey, body_w, body_h)
-                    if info:
-                        mode = self._hit_test_shape(info, mx, my)
-                        if mode:
-                            target_node = node
-                            target_mode = mode
-                            target_info = info
-                            break
-
-            if target_node:
-                if self.active_selected_node_id != target_node.id:
-                    self.active_selected_node_id = target_node.id
+            if target_shape:
+                hb_node = target_shape[10]
+                if self.active_selected_node_id != hb_node.id:
+                    self.active_selected_node_id = hb_node.id
                     dpg.clear_selected_nodes("editor_tag")
-                    self.rebuild_inspector(target_node.id)
+                    self.rebuild_inspector(hb_node.id)
 
                 self.preview_dragging = True
                 self.preview_drag_mode = target_mode
-                self.preview_drag_is_vis = target_is_vis
                 self.preview_drag_start_mouse = (mx, my)
-                shape_type, w, h, r, offset_x, offset_y, angle, det_type, cx_shape, cy_shape = target_info
+
+                hb = target_shape[10]
                 self.preview_drag_start_val = {
-                    "offset_x": offset_x, "offset_y": offset_y,
-                    "w": w, "h": h, "r": r, "angle": angle,
-                    "cx_shape": cx_shape, "cy_shape": cy_shape
+                    "offset_x": safe_num(hb.properties.get("offset_x"), 0),
+                    "offset_y": safe_num(hb.properties.get("offset_y"), 0),
+                    "w": safe_num(hb.properties.get("w"), 50),
+                    "h": safe_num(hb.properties.get("h"), 40),
+                    "r": safe_num(hb.properties.get("r"), 25),
+                    "angle": safe_num(hb.properties.get("angle"), 0.0),
+                    "cx_shape": target_shape[8],
+                    "cy_shape": target_shape[9]
                 }
             else:
                 self.preview_canvas_panning = True
@@ -4571,51 +5152,53 @@ class NodeEditorPreviewMixin:
         if getattr(self, "preview_canvas_panning", False) and not down:
             self.preview_canvas_panning = False
 
-        if self.preview_dragging and down and active_node:
-            info = self.get_node_shape_info(active_node, ex, ey, body_w, body_h, is_vis_box=getattr(self, "preview_drag_is_vis", False))
-            if info:
-                dx_mouse = mx - self.preview_drag_start_mouse[0]
-                dy_mouse = my - self.preview_drag_start_mouse[1]
+        if self.preview_dragging and down and active_node and active_node.type == "Hitbox":
+            dx_mouse = mx - self.preview_drag_start_mouse[0]
+            dy_mouse = my - self.preview_drag_start_mouse[1]
 
-                start_vals = self.preview_drag_start_val
+            dx_world = dx_mouse / zoom
+            dy_world = dy_mouse / zoom
+
+            start_vals = self.preview_drag_start_val
+            updates = {}
+            mode = self.preview_drag_mode
+
+            if mode == "move":
+                updates["offset_x"] = int(start_vals["offset_x"] + dx_world)
+                updates["offset_y"] = int(start_vals["offset_y"] + dy_world)
+            elif mode == "resize_right":
+                updates["w"] = max(5, int(start_vals["w"] + dx_world))
+            elif mode == "resize_left":
+                new_w = max(5, int(start_vals["w"] - dx_world))
+                updates["w"] = new_w
+                updates["offset_x"] = int(start_vals["offset_x"] + (start_vals["w"] - new_w))
+            elif mode == "resize_bottom":
+                updates["h"] = max(5, int(start_vals["h"] + dy_world))
+            elif mode == "resize_top":
+                new_h = max(5, int(start_vals["h"] - dy_world))
+                updates["h"] = new_h
+                updates["offset_y"] = int(start_vals["offset_y"] + (start_vals["h"] - new_h))
+            elif mode == "resize_circle":
                 cx_shape_start = start_vals["cx_shape"]
                 cy_shape_start = start_vals["cy_shape"]
-                start_offset_x = start_vals["offset_x"]
-                start_offset_y = start_vals["offset_y"]
-                start_w = start_vals["w"]
-                start_h = start_vals["h"]
-                start_r = start_vals["r"]
-                start_angle = start_vals["angle"]
+                current_dist = math.hypot(mx - cx_shape_start, my - cy_shape_start)
+                updates["r"] = max(5, int(current_dist / zoom))
+            elif mode == "rotate":
+                cx_shape_start = start_vals["cx_shape"]
+                cy_shape_start = start_vals["cy_shape"]
+                start_mouse_angle = math.atan2(self.preview_drag_start_mouse[1] - cy_shape_start, self.preview_drag_start_mouse[0] - cx_shape_start)
+                current_mouse_angle = math.atan2(my - cy_shape_start, mx - cx_shape_start)
+                angle_diff_rad = current_mouse_angle - start_mouse_angle
+                angle_diff_deg = math.degrees(angle_diff_rad)
+                updates["angle"] = float(start_vals["angle"] - angle_diff_deg)
 
-                updates = {}
-                mode = self.preview_drag_mode
-
-                if mode == "move":
-                    updates["offset_x"] = start_offset_x + dx_mouse
-                    updates["offset_y"] = start_offset_y + dy_mouse
-                elif mode == "resize_right":
-                    updates["w"] = max(5, int(start_w + dx_mouse))
-                elif mode == "resize_left":
-                    new_w = max(5, int(start_w - dx_mouse))
-                    updates["w"] = new_w
-                    updates["offset_x"] = int(start_offset_x + (start_w - new_w))
-                elif mode == "resize_bottom":
-                    updates["h"] = max(5, int(start_h + dy_mouse))
-                elif mode == "resize_top":
-                    new_h = max(5, int(start_h - dy_mouse))
-                    updates["h"] = new_h
-                    updates["offset_y"] = int(start_offset_y + (start_h - new_h))
-                elif mode == "resize_circle":
-                    current_dist = math.hypot(mx - cx_shape_start, my - cy_shape_start)
-                    updates["r"] = max(5, int((start_r + current_dist) / 2))
-
-                self.set_node_shape_properties(active_node, updates, is_vis_box=getattr(self, "preview_drag_is_vis", False))
-                self.rebuild_inspector(active_node.id)
+            for k, v in updates.items():
+                active_node.properties[k] = v
+            self.rebuild_inspector(active_node.id)
 
         if self.preview_dragging and not down:
             self.preview_dragging = False
             self.preview_drag_mode = None
-            self.preview_drag_is_vis = False
             self.save_preset_file(None, None)
 </file>
 
@@ -4920,8 +5503,9 @@ class NodeEditorUIMixin:
         with dpg.window(label="Interactive Preview Panel", tag="preview_window", width=380, height=340, pos=[950, 150], no_close=True, no_move=True):
             with dpg.group(horizontal=True):
                 dpg.add_button(label="Reset View", callback=self.reset_preview_pan)
-                dpg.add_text("RMB: Pan | Drag to resize")
-            dpg.add_drawlist(width=360, height=270, tag="preview_drawlist")
+                dpg.add_slider_float(label="Zoom", tag="preview_zoom", default_value=0.5, min_value=0.1, max_value=2.0, width=120)
+            # drawlist инициализируется с width=-1 и height=-1 для авторасширения в окне
+            dpg.add_drawlist(width=-1, height=-1, tag="preview_drawlist")
 
     def resize_callback(self, sender, app_data):
         if not dpg.does_item_exist("main_window"):
@@ -6538,7 +7122,7 @@ class EnemyAILogicMixin(AICombatMixin, AIFlowMixin, AIActionProcessorMixin):
                 self.attack_cooldown_timer = flow_ref.get("post_cooldown", 30)
 
         # Синхронизируем классические переменные для рендера
-        active_attacks = [act for act in self.running_actions if act["type"] == "attack"]
+        active_attacks = [act for act in getattr(self, "running_actions", []) if act["type"] == "attack"]
         if active_attacks:
             first_atk = active_attacks[0]
             self.is_winding_up = first_atk["is_winding_up"]
@@ -6560,7 +7144,6 @@ class EnemyAILogicMixin(AICombatMixin, AIFlowMixin, AIActionProcessorMixin):
         # ДВИЖЕНИЕ ПАТРУЛИРОВАНИЯ И ПРЕСЛЕДОВАНИЯ
         if self.active_flow is None and not self.running_sequences and not self.running_actions and getattr(self, "active_order", None) is None:
             move_cfg = self.config.get("movement_config", {})
-            global_stop_dist = move_cfg.setdefault("stop_dist", 60)
 
             if move_cfg.get("patrol_on_platform", False) and platforms:
                 standing_plat = None
@@ -6606,33 +7189,14 @@ class EnemyAILogicMixin(AICombatMixin, AIFlowMixin, AIActionProcessorMixin):
                         dy = player.rect.centery - self.rect.centery
                         distance = math.hypot(dx, dy)
 
-                        stop_distances = []
-                        for idx in range(len(self.trigger_zones)):
-                            if idx in getattr(self, "connected_seq_indices", set()):
-                                continue
-                            is_in_flow = any(
-                                (step.get("is_random", False) and idx in step.get("seq_pool", [])) or
-                                (not step.get("is_random", False) and idx == step.get("seq_idx", 0))
-                                for flow in self.flows
-                                for step in flow.get("steps", []))
-                            if not is_in_flow:
-                                stop_distances.append(self.get_stopping_distance(idx))
-
-                        for f_idx in range(len(self.flows)):
-                            if f_idx in getattr(self, "connected_flow_indices", set()):
-                                continue
-                            stop_distances.append(self.get_flow_stopping_distance(f_idx))
-
-                        for o_idx in range(len(self.orders)):
-                            stop_distances.append(self.get_order_stopping_distance(o_idx))
-
-                        raw_stop_dist = max(stop_distances) if stop_distances else 5
-                        trigger_stop_dist = raw_stop_dist + self.rect.width / 2 + player.rect.width / 2
-                        stop_dist = max(2.0, max(trigger_stop_dist - 5.0, global_stop_dist))
-
-                        if distance > stop_dist:
-                            vx = (dx / distance) * (self.speed * 1.4)
-                            self.vy = (dy / distance) * (self.speed * 1.4)
+                        # Преследуем, только если игрок находится ВНЕ триггерной зоны остановки
+                        if not self.check_player_in_stop_zone(player.rect):
+                            if distance > 0:
+                                vx = (dx / distance) * (self.speed * 1.4)
+                                self.vy = (dy / distance) * (self.speed * 1.4)
+                            else:
+                                vx = 0
+                                self.vy = 0
 
                             if getattr(self, "was_collided_x", False):
                                 dir_y = -1 if dy < 0 else 1 if dy > 0 else -1
@@ -6647,58 +7211,13 @@ class EnemyAILogicMixin(AICombatMixin, AIFlowMixin, AIActionProcessorMixin):
                             self.vy = 0
                         if dx != 0:
                             self.direction = 1 if dx > 0 else -1
-                    else:
-                        overlapping_zones = []
-                        for idx in range(len(self.trigger_zones)):
-                            if idx in getattr(self, "connected_seq_indices", set()):
-                                continue
-                            is_in_flow = any(
-                                (step.get("is_random", False) and idx in step.get("seq_pool", [])) or
-                                (not step.get("is_random", False) and idx == step.get("seq_idx", 0))
-                                for flow in self.flows
-                                for step in flow.get("steps", []))
-                            if is_in_flow:
-                                continue
-                            if self.check_zone_vertical_overlap(player.rect, idx):
-                                overlapping_zones.append(("sequence", idx))
-
-                        for f_idx in range(len(self.flows)):
-                            if f_idx in getattr(self, "connected_flow_indices", set()):
-                                continue
-                            if self.check_flow_zone_vertical_overlap(player.rect, f_idx):
-                                overlapping_zones.append(("flow", f_idx))
-
-                        if overlapping_zones:
-                            stop_distances = []
-                            for z_type, z_idx in overlapping_zones:
-                                if z_type == "sequence":
-                                    stop_distances.append(self.get_stopping_distance(z_idx))
-                                else:
-                                    stop_distances.append(self.get_flow_stopping_distance(z_idx))
-
-                            raw_stop_dist = max(stop_distances)
-                            trigger_stop_dist = raw_stop_dist + self.rect.width / 2 + player.rect.width / 2
-                            stop_dist = max(2.0, max(trigger_stop_dist - 3.0, global_stop_dist))
-
-                            distance = abs(player.rect.centerx - self.rect.centerx)
-                            self.direction = 1 if player.rect.centerx > self.rect.centerx else -1
-
-                            if distance <= stop_dist:
-                                vx = 0
-                            else:
-                                desired_vx = self.speed * 1.4
-                                max_allowed_vx = distance - stop_dist
-                                vx = min(desired_vx, max_allowed_vx) * self.direction
+                    else:  # walking
+                        self.direction = 1 if player.rect.centerx > self.rect.centerx else -1
+                        # Двигаемся, только если игрок ВНЕ триггерной зоны остановки
+                        if self.check_player_in_stop_zone(player.rect):
+                            vx = 0
                         else:
-                            distance = abs(player.rect.centerx - self.rect.centerx)
-                            self.direction = 1 if player.rect.centerx > self.rect.centerx else -1
-
-                            if distance <= global_stop_dist:
-                                vx = 0
-                            else:
-                                desired_vx = self.speed * 1.4
-                                max_allowed_vx = distance - global_stop_dist
-                                vx = min(desired_vx, max_allowed_vx) * self.direction
+                            vx = self.speed * 1.4 * self.direction
                 else:  # Patrol
                     if self.rect.centerx < self.min_x:
                         self.direction = 1
@@ -6757,220 +7276,385 @@ def safe_int(val, default=0):
     if isinstance(val, (int, float)):
         return int(val)
     if isinstance(val, str):
-        # Если значение является неразрешенным плейсхолдером шаблона
         if val.startswith("$"):
             return default
         try:
-            # Безопасно обрабатываем строки вида "150" или "150.0"
             return int(float(val))
         except (ValueError, TypeError):
             return default
     return default
 
 class EnemyCollisionMixin:
+    # --- Одиночные методы-обертки для совместимости с редактором Pygame ---
     def get_detection_shape(self):
-        det = self.config.get("detection")
-        if not det:
-            return None
-        shape = det["shape"]
-        ox, oy = det["offset_x"], det["offset_y"]
-        angle = det.get("angle", 0)
-        det_type = det.get("type", "following")
+        shapes = self.get_detection_shapes()
+        return shapes[0] if shapes else None
 
-        if shape["type"] == "rectangle":
-            w, h = shape["w"], shape["h"]
-            if det_type == "following" and self.direction == -1:
-                abs_x = self.rect.left - ox - w
-                effective_angle = -angle
-            elif det_type == "following":
-                abs_x = self.rect.right + ox
-                effective_angle = angle
-            else:
+    def get_attack_zone_shape_for_attack_zone(self, z_idx):
+        shapes = self.get_attack_zone_shapes_for_sequence(z_idx)
+        return shapes[0] if shapes else None
+
+    def get_attack_zone_shape_for_flow_zone(self, f_idx):
+        shapes = self.get_attack_zone_shapes_for_flow(f_idx)
+        return shapes[0] if shapes else None
+
+    def get_attack_zone_shape_for_order_zone(self, o_idx):
+        shapes = self.get_attack_zone_shapes_for_order(o_idx)
+        return shapes[0] if shapes else None
+
+    # --- Множественные хитбоксы тела противника (Root -> Body Shapes) ---
+    def get_body_shapes(self):
+        shapes_list = self.config.get("body_shapes", [])
+        if not shapes_list and "body" in self.config:
+            b = self.config["body"]
+            shapes_list = [{
+                "shape": {"type": "rectangle", "w": b.get("w", 30), "h": b.get("h", 50)},
+                "offset_x": 0, "offset_y": 0, "angle": 0
+            }]
+
+        resolved_shapes = []
+        for s in shapes_list:
+            shape = s["shape"]
+            ox, oy = s.get("offset_x", 0), s.get("offset_y", 0)
+            angle = s.get("angle", 0)
+            stype = shape.get("type", "rectangle")
+
+            if stype == "rectangle":
+                w, h = shape["w"], shape["h"]
                 abs_x = self.rect.x + ox
-                effective_angle = angle
-            abs_y = self.rect.y + oy
-            return ("rectangle", (pygame.Rect(abs_x, abs_y, w, h), effective_angle))
+                abs_y = self.rect.y + oy
+                resolved_shapes.append(("rectangle", (pygame.Rect(abs_x, abs_y, w, h), angle)))
+            elif stype == "circle":
+                r = shape["r"]
+                cx = self.rect.centerx + ox
+                cy = self.rect.centery + oy
+                resolved_shapes.append(("circle", (cx, cy, r)))
+        return resolved_shapes
 
-        elif shape["type"] == "circle":
-            r = shape["r"]
-            if det_type == "following" and self.direction == -1:
-                cx = self.rect.left - ox - r
-            elif det_type == "following":
-                cx = self.rect.right + ox + r
-            else:
-                cx = self.rect.x + ox + r
-            cy = self.rect.y + oy + r
-            return ("circle", (cx, cy, r))
-        return None
+    # --- Множественные зоны зрения (Root -> Detection Shapes) ---
+    def get_detection_shapes(self):
+        shapes_list = self.config.get("detection_shapes", [])
+        if not shapes_list and "detection" in self.config:
+            det = self.config["detection"]
+            shapes_list = [{
+                "shape": det.get("shape", {"type": "rectangle", "w": 220, "h": 70}),
+                "offset_x": det.get("offset_x", 0),
+                "offset_y": det.get("offset_y", -10),
+                "angle": det.get("angle", 0),
+                "type": det.get("type", "following")
+            }]
+
+        resolved_shapes = []
+        for s in shapes_list:
+            shape = s["shape"]
+            ox, oy = s.get("offset_x", 0), s.get("offset_y", 0)
+            angle = s.get("angle", 0)
+            det_type = s.get("type", "following")
+            stype = shape.get("type", "rectangle")
+
+            if stype == "rectangle":
+                w, h = shape["w"], shape["h"]
+                if det_type == "following" and self.direction == -1:
+                    abs_x = self.rect.left - ox - w
+                    effective_angle = -angle
+                elif det_type == "following":
+                    abs_x = self.rect.right + ox
+                    effective_angle = angle
+                else:
+                    abs_x = self.rect.x + ox
+                    effective_angle = angle
+                abs_y = self.rect.y + oy
+                resolved_shapes.append(("rectangle", (pygame.Rect(abs_x, abs_y, w, h), effective_angle)))
+            elif stype == "circle":
+                r = shape["r"]
+                if det_type == "following" and self.direction == -1:
+                    cx = self.rect.left - ox - r
+                elif det_type == "following":
+                    cx = self.rect.right + ox + r
+                else:
+                    cx = self.rect.x + ox + r
+                cy = self.rect.y + oy + r
+                resolved_shapes.append(("circle", (cx, cy, r)))
+        return resolved_shapes
+
+    # --- Множественные зоны остановки (Root -> Stopping Shapes) ---
+    def get_stop_shapes(self):
+        shapes_list = self.config.get("stop_shapes", [])
+        if not shapes_list:
+            # Резервный хитбокс на основе старого stop_dist для обратной совместимости
+            move_cfg = self.config.get("movement_config", {})
+            stop_dist = move_cfg.get("stop_dist", 60)
+            shapes_list = [{
+                "shape": {"type": "rectangle", "w": stop_dist * 2, "h": self.rect.height + 40},
+                "offset_x": -stop_dist + self.rect.width // 2, "offset_y": -20,
+                "angle": 0, "type": "stationary"
+            }]
+
+        resolved_shapes = []
+        for s in shapes_list:
+            shape = s["shape"]
+            ox, oy = s.get("offset_x", 0), s.get("offset_y", 0)
+            angle = s.get("angle", 0)
+            det_type = s.get("type", "stationary")
+            stype = shape.get("type", "rectangle")
+
+            if stype == "rectangle":
+                w, h = shape["w"], shape["h"]
+                if det_type == "following" and self.direction == -1:
+                    abs_x = self.rect.left - ox - w
+                    effective_angle = -angle
+                elif det_type == "following":
+                    abs_x = self.rect.right + ox
+                    effective_angle = angle
+                else:
+                    abs_x = self.rect.x + ox
+                    effective_angle = angle
+                abs_y = self.rect.y + oy
+                resolved_shapes.append(("rectangle", (pygame.Rect(abs_x, abs_y, w, h), effective_angle)))
+            elif stype == "circle":
+                r = shape["r"]
+                if det_type == "following" and self.direction == -1:
+                    cx = self.rect.left - ox - r
+                elif det_type == "following":
+                    cx = self.rect.right + ox + r
+                else:
+                    cx = self.rect.x + ox + r
+                cy = self.rect.y + oy + r
+                resolved_shapes.append(("circle", (cx, cy, r)))
+        return resolved_shapes
+
+    def check_player_in_stop_zone(self, player_rect):
+        for stype, val in self.get_stop_shapes():
+            if self._check_single_shape_collision(player_rect, stype, val):
+                return True
+        return False
 
     def check_player_detected(self, player_rect):
         if self.rect.colliderect(player_rect):
             return True
 
-        for idx in range(len(self.trigger_zones)):
-            # Байпас триггеров связанных последовательностей
-            if idx in getattr(self, "connected_seq_indices", set()):
-                continue
+        for stype, val in self.get_detection_shapes():
+            if self._check_single_shape_collision(player_rect, stype, val):
+                return True
 
-            is_in_flow = False
-            for flow in self.flows:
-                for step in flow.get("steps", []):
-                    if step.get("is_random", False):
-                        if idx in step.get("seq_pool", []):
-                            is_in_flow = True
-                    else:
-                        if idx == step.get("seq_idx", 0):
-                            is_in_flow = True
-            if is_in_flow:
+        for idx in range(len(self.sequences)):
+            if idx in getattr(self, "connected_seq_indices", set()):
                 continue
             if self.check_player_in_zone(player_rect, idx):
                 return True
 
         for f_idx in range(len(self.flows)):
-            # Байпас триггеров связанных потоков
             if f_idx in getattr(self, "connected_flow_indices", set()):
                 continue
             if self.check_player_in_flow_zone(player_rect, f_idx):
                 return True
 
-        # Коллизия с фиолетовыми триггерами порядка (Order)
         for o_idx in range(len(self.orders)):
             if self.check_player_in_order_zone(player_rect, o_idx):
                 return True
 
-        shape_data = self.get_detection_shape()
-        if not shape_data:
-            return False
-        stype, val = shape_data
-        if stype == "rectangle":
-            rect, angle = val
-            if angle == 0:
-                return rect.colliderect(player_rect)
-            else:
-                player_poly = [
-                    (player_rect.left, player_rect.top),
-                    (player_rect.right, player_rect.top),
-                    (player_rect.right, player_rect.bottom),
-                    (player_rect.left, player_rect.bottom)
-                ]
-                w, h = rect.width, rect.height
-                cx, cy = rect.centerx, rect.centery
-                rad = math.radians(-angle)
-                cos_a, sin_a = math.cos(rad), math.sin(rad)
-                dx, dy = w / 2, h / 2
-                rect_poly = []
-                for px, py in [(-dx, -dy), (dx, -dy), (dx, dy), (-dx, dy)]:
-                    rx = px * cos_a - py * sin_a + cx
-                    ry = px * sin_a + py * cos_a + cy
-                    rect_poly.append((rx, ry))
-                return collides_polygon_polygon(player_poly, rect_poly)
-        elif stype == "circle":
-            cx, cy, r = val
-            closest_x = max(player_rect.left, min(cx, player_rect.right))
-            closest_y = max(player_rect.top, min(cy, player_rect.bottom))
-            distance_sq = (cx - closest_x)**2 + (cy - closest_y)**2
-            return distance_sq <= r**2
         return False
 
-    def get_attack_zone_shape_for_attack_zone(self, z_idx):
-        if z_idx >= len(self.trigger_zones):
-            return None
-        det = self.trigger_zones[z_idx]
-        shape = det["shape"]
-        ox, oy = det["offset_x"], det["offset_y"]
-        det_type = det.get("type", "following")
-        angle = det.get("angle", 0)
+    # --- Множественные хитбоксы триггера Sequence ---
+    def get_attack_zone_shapes_for_sequence(self, z_idx):
+        if z_idx >= len(self.sequences):
+            return []
+        seq = self.sequences[z_idx]
+        shapes_list = seq.get("trigger_shapes", [])
+        if not shapes_list and "trigger_zone" in seq:
+            tz = seq["trigger_zone"]
+            shapes_list = [{
+                "shape": tz.get("shape", {"type": "rectangle", "w": 90, "h": 50}),
+                "offset_x": tz.get("offset_x", 10),
+                "offset_y": tz.get("offset_y", 0),
+                "angle": tz.get("angle", 0),
+                "type": tz.get("type", "following")
+            }]
 
-        if shape["type"] == "rectangle":
-            w, h = shape["w"], shape["h"]
-            if det_type == "following" and self.direction == -1:
-                abs_x = self.rect.left - ox - w
-                effective_angle = -angle
-            elif det_type == "following":
-                abs_x = self.rect.right + ox
-                effective_angle = angle
-            else:
-                abs_x = self.rect.x + ox
-                effective_angle = angle
-            abs_y = self.rect.y + oy
-            return ("rectangle", (pygame.Rect(abs_x, abs_y, w, h), effective_angle))
+        resolved_shapes = []
+        for s in shapes_list:
+            shape = s["shape"]
+            ox, oy = s.get("offset_x", 0), s.get("offset_y", 0)
+            angle = s.get("angle", 0)
+            det_type = s.get("type", "following")
+            stype = shape.get("type", "rectangle")
 
-        elif shape["type"] == "circle":
-            r = shape["r"]
-            if det_type == "following" and self.direction == -1:
-                cx = self.rect.left - ox - r
-            elif det_type == "following":
-                cx = self.rect.right + ox + r
-            else:
-                cx = self.rect.x + ox + r
-            cy = self.rect.y + oy + r
-            return ("circle", (cx, cy, r))
-        return None
+            if stype == "rectangle":
+                w, h = shape["w"], shape["h"]
+                if det_type == "following" and self.direction == -1:
+                    abs_x = self.rect.left - ox - w
+                    effective_angle = -angle
+                elif det_type == "following":
+                    abs_x = self.rect.right + ox
+                    effective_angle = angle
+                else:
+                    abs_x = self.rect.x + ox
+                    effective_angle = angle
+                abs_y = self.rect.y + oy
+                resolved_shapes.append(("rectangle", (pygame.Rect(abs_x, abs_y, w, h), effective_angle)))
+            elif stype == "circle":
+                r = shape["r"]
+                if det_type == "following" and self.direction == -1:
+                    cx = self.rect.left - ox - r
+                elif det_type == "following":
+                    cx = self.rect.right + ox + r
+                else:
+                    cx = self.rect.x + ox + r
+                cy = self.rect.y + oy + r
+                resolved_shapes.append(("circle", (cx, cy, r)))
+        return resolved_shapes
 
     def check_player_in_zone(self, player_rect, z_idx):
-        shape_data = self.get_attack_zone_shape_for_attack_zone(z_idx)
-        if not shape_data:
-            return False
-        stype, val = shape_data
-        if stype == "rectangle":
-            rect, angle = val
-            if angle == 0:
-                return rect.colliderect(player_rect)
-            else:
-                player_poly = [
-                    (player_rect.left, player_rect.top),
-                    (player_rect.right, player_rect.top),
-                    (player_rect.right, player_rect.bottom),
-                    (player_rect.left, player_rect.bottom)
-                ]
-                w, h = rect.width, rect.height
-                cx, cy = rect.centerx, rect.centery
-                rad = math.radians(-angle)
-                cos_a, sin_a = math.cos(rad), math.sin(rad)
-                dx, dy = w / 2, h / 2
-                rect_poly = []
-                for px, py in [(-dx, -dy), (dx, -dy), (dx, dy), (-dx, dy)]:
-                    rx = px * cos_a - py * sin_a + cx
-                    ry = px * sin_a + py * cos_a + cy
-                    rect_poly.append((rx, ry))
-                return collides_polygon_polygon(player_poly, rect_poly)
-        elif stype == "circle":
-            cx, cy, r = val
-            closest_x = max(player_rect.left, min(cx, player_rect.right))
-            closest_y = max(player_rect.top, min(cy, player_rect.bottom))
-            distance_sq = (cx - closest_x)**2 + (cy - closest_y)**2
-            return distance_sq <= r**2
+        for stype, val in self.get_attack_zone_shapes_for_sequence(z_idx):
+            if self._check_single_shape_collision(player_rect, stype, val):
+                return True
         return False
 
     def check_zone_vertical_overlap(self, player_rect, z_idx):
-        shape_data = self.get_attack_zone_shape_for_attack_zone(z_idx)
-        if not shape_data:
-            return False
-        stype, val = shape_data
-        if stype == "rectangle":
-            rect, angle = val
-            if angle == 0:
-                return (rect.bottom > player_rect.top) and (rect.top < player_rect.bottom)
-            else:
-                w, h = rect.width, rect.height
-                cx, cy = rect.centerx, rect.centery
-                rad = math.radians(-angle)
-                cos_a, sin_a = math.cos(rad), math.sin(rad)
-                dx, dy = w / 2, h / 2
-                y_coords = []
-                for px, py in [(-dx, -dy), (dx, -dy), (dx, dy), (-dx, dy)]:
-                    ry = px * sin_a + py * cos_a + cy
-                    y_coords.append(ry)
-                min_y = min(y_coords)
-                max_y = max(y_coords)
-                return (max_y > player_rect.top) and (min_y < player_rect.bottom)
-        elif stype == "circle":
-            cx, cy, r = val
-            min_y = cy - r
-            max_y = cy + r
-            return (max_y > player_rect.top) and (min_y < player_rect.bottom)
+        for stype, val in self.get_attack_zone_shapes_for_sequence(z_idx):
+            if stype == "rectangle":
+                rect, angle = val
+                if angle == 0:
+                    if (rect.bottom > player_rect.top) and (rect.top < player_rect.bottom):
+                        return True
+                else:
+                    y_coords = self._get_rotated_rect_y_coords(rect, angle)
+                    if max(y_coords) > player_rect.top and min(y_coords) < player_rect.bottom:
+                        return True
+            elif stype == "circle":
+                cx, cy, r = val
+                if (cy + r > player_rect.top) and (cy - r < player_rect.bottom):
+                    return True
         return False
 
+    # --- Множественные хитбоксы триггера Flow ---
+    def get_attack_zone_shapes_for_flow(self, f_idx):
+        if f_idx >= len(self.flows):
+            return []
+        flow = self.flows[f_idx]
+        shapes_list = flow.get("trigger_shapes", [])
+        if not shapes_list and "trigger_zone" in flow:
+            tz = flow["trigger_zone"]
+            shapes_list = [{
+                "shape": tz.get("shape", {"type": "rectangle", "w": 250, "h": 80}),
+                "offset_x": tz.get("offset_x", 0),
+                "offset_y": tz.get("offset_y", 0),
+                "angle": tz.get("angle", 0),
+                "type": tz.get("type", "following")
+            }]
+
+        resolved_shapes = []
+        for s in shapes_list:
+            shape = s["shape"]
+            ox, oy = s.get("offset_x", 0), s.get("offset_y", 0)
+            angle = s.get("angle", 0)
+            det_type = s.get("type", "following")
+            stype = shape.get("type", "rectangle")
+
+            if stype == "rectangle":
+                w, h = shape["w"], shape["h"]
+                if det_type == "following" and self.direction == -1:
+                    abs_x = self.rect.left - ox - w
+                    effective_angle = -angle
+                elif det_type == "following":
+                    abs_x = self.rect.right + ox
+                    effective_angle = angle
+                else:
+                    abs_x = self.rect.x + ox
+                    effective_angle = angle
+                abs_y = self.rect.y + oy
+                resolved_shapes.append(("rectangle", (pygame.Rect(abs_x, abs_y, w, h), effective_angle)))
+            elif stype == "circle":
+                r = shape["r"]
+                if det_type == "following" and self.direction == -1:
+                    cx = self.rect.left - ox - r
+                elif det_type == "following":
+                    cx = self.rect.right + ox + r
+                else:
+                    cx = self.rect.x + ox + r
+                cy = self.rect.y + oy + r
+                resolved_shapes.append(("circle", (cx, cy, r)))
+        return resolved_shapes
+
+    def check_player_in_flow_zone(self, player_rect, f_idx):
+        for stype, val in self.get_attack_zone_shapes_for_flow(f_idx):
+            if self._check_single_shape_collision(player_rect, stype, val):
+                return True
+        return False
+
+    def check_flow_zone_vertical_overlap(self, player_rect, f_idx):
+        for stype, val in self.get_attack_zone_shapes_for_flow(f_idx):
+            if stype == "rectangle":
+                rect, angle = val
+                if angle == 0:
+                    if (rect.bottom > player_rect.top) and (rect.top < player_rect.bottom):
+                        return True
+                else:
+                    y_coords = self._get_rotated_rect_y_coords(rect, angle)
+                    if max(y_coords) > player_rect.top and min(y_coords) < player_rect.bottom:
+                        return True
+            elif stype == "circle":
+                cx, cy, r = val
+                if (cy + r > player_rect.top) and (cy - r < player_rect.bottom):
+                    return True
+        return False
+
+    # --- Множественные хитбоксы триггера Order ---
+    def get_attack_zone_shapes_for_order(self, o_idx):
+        if o_idx >= len(self.orders):
+            return []
+        order = self.orders[o_idx]
+        shapes_list = order.get("trigger_shapes", [])
+        if not shapes_list and "trigger_zone" in order:
+            tz = order["trigger_zone"]
+            shapes_list = [{
+                "shape": tz.get("shape", {"type": "rectangle", "w": 150, "h": 60}),
+                "offset_x": tz.get("offset_x", 0),
+                "offset_y": tz.get("offset_y", 0),
+                "angle": tz.get("angle", 0),
+                "type": tz.get("type", "following")
+            }]
+
+        resolved_shapes = []
+        for s in shapes_list:
+            shape = s["shape"]
+            ox, oy = s.get("offset_x", 0), s.get("offset_y", 0)
+            angle = s.get("angle", 0)
+            det_type = s.get("type", "following")
+            stype = shape.get("type", "rectangle")
+
+            if stype == "rectangle":
+                w, h = shape["w"], shape["h"]
+                if det_type == "following" and self.direction == -1:
+                    abs_x = self.rect.left - ox - w
+                    effective_angle = -angle
+                elif det_type == "following":
+                    abs_x = self.rect.right + ox
+                    effective_angle = angle
+                else:
+                    abs_x = self.rect.x + ox
+                    effective_angle = angle
+                abs_y = self.rect.y + oy
+                resolved_shapes.append(("rectangle", (pygame.Rect(abs_x, abs_y, w, h), effective_angle)))
+            elif stype == "circle":
+                r = shape["r"]
+                if det_type == "following" and self.direction == -1:
+                    cx = self.rect.left - ox - r
+                elif det_type == "following":
+                    cx = self.rect.right + ox + r
+                else:
+                    cx = self.rect.x + ox + r
+                cy = self.rect.y + oy + r
+                resolved_shapes.append(("circle", (cx, cy, r)))
+        return resolved_shapes
+
+    def check_player_in_order_zone(self, player_rect, o_idx):
+        for stype, val in self.get_attack_zone_shapes_for_order(o_idx):
+            if self._check_single_shape_collision(player_rect, stype, val):
+                return True
+        return False
+
+    # --- Хитбоксы атак ---
     def get_attack_shapes_by_index(self, a_idx):
         if a_idx >= len(self.attacks):
             return []
@@ -7019,11 +7703,7 @@ class EnemyCollisionMixin:
             else:
                 cx = self.rect.right + ox + r
             cy = self.rect.y + oy + r
-
-            closest_x = max(player.rect.left, min(cx, player.rect.right))
-            closest_y = max(player.rect.top, min(cy, player.rect.bottom))
-            distance_sq = (cx - closest_x)**2 + (cy - closest_y)**2
-            return distance_sq <= r**2
+            return self._check_single_shape_collision(player.rect, "circle", (cx, cy, r))
         else:
             w = shape.get("w", 50)
             h = shape.get("h", 40)
@@ -7034,72 +7714,10 @@ class EnemyCollisionMixin:
                 abs_x = self.rect.right + ox
                 effective_angle = angle
             abs_y = self.rect.y + oy
-            rect = pygame.Rect(abs_x, abs_y, w, h)
+            return self._check_single_shape_collision(player.rect, "rectangle", (pygame.Rect(abs_x, abs_y, w, h), effective_angle))
 
-            if effective_angle == 0:
-                return rect.colliderect(player.rect)
-            else:
-                p_rect = player.rect
-                player_poly = [
-                    (p_rect.left, p_rect.top),
-                    (p_rect.right, p_rect.top),
-                    (p_rect.right, p_rect.bottom),
-                    (p_rect.left, p_rect.bottom)
-                ]
-
-                cx, cy = rect.centerx, rect.centery
-                rad = math.radians(-effective_angle)
-                cos_a, sin_a = math.cos(rad), math.sin(rad)
-                dx, dy = w / 2, h / 2
-
-                rect_poly = []
-                for px, py in [(-dx, -dy), (dx, -dy), (dx, dy), (-dx, dy)]:
-                    rx = px * cos_a - py * sin_a + cx
-                    ry = px * sin_a + py * cos_a + cy
-                    rect_poly.append((rx, ry))
-
-                return collides_polygon_polygon(player_poly, rect_poly)
-
-    def get_attack_zone_shape_for_flow_zone(self, f_idx):
-        if f_idx >= len(self.flows):
-            return None
-        det = self.flows[f_idx]
-        shape = det.setdefault("trigger_zone", {}).setdefault("shape", { "template": "forms.rect", "w": 250, "h": 80 })
-        ox, oy = det["trigger_zone"].get("offset_x", 0), det["trigger_zone"].get("offset_y", 0)
-        det_type = det["trigger_zone"].get("type", "following")
-        angle = det["trigger_zone"].get("angle", 0)
-
-        if shape["type"] == "rectangle":
-            w, h = shape["w"], shape["h"]
-            if det_type == "following" and self.direction == -1:
-                abs_x = self.rect.left - ox - w
-                effective_angle = -angle
-            elif det_type == "following":
-                abs_x = self.rect.right + ox
-                effective_angle = angle
-            else:
-                abs_x = self.rect.x + ox
-                effective_angle = angle
-            abs_y = self.rect.y + oy
-            return ("rectangle", (pygame.Rect(abs_x, abs_y, w, h), effective_angle))
-
-        elif shape["type"] == "circle":
-            r = shape["r"]
-            if det_type == "following" and self.direction == -1:
-                cx = self.rect.left - ox - r
-            elif det_type == "following":
-                cx = self.rect.right + ox + r
-            else:
-                cx = self.rect.x + ox + r
-            cy = self.rect.y + oy + r
-            return ("circle", (cx, cy, r))
-        return None
-
-    def check_player_in_flow_zone(self, player_rect, f_idx):
-        shape_data = self.get_attack_zone_shape_for_flow_zone(f_idx)
-        if not shape_data:
-            return False
-        stype, val = shape_data
+    # --- Универсальный физический расчет пересечений ---
+    def _check_single_shape_collision(self, player_rect, stype, val):
         if stype == "rectangle":
             rect, angle = val
             if angle == 0:
@@ -7130,118 +7748,17 @@ class EnemyCollisionMixin:
             return distance_sq <= r**2
         return False
 
-    def check_flow_zone_vertical_overlap(self, player_rect, f_idx):
-        shape_data = self.get_attack_zone_shape_for_flow_zone(f_idx)
-        if not shape_data:
-            return False
-        stype, val = shape_data
-        if stype == "rectangle":
-            rect, angle = val
-            if angle == 0:
-                return (rect.bottom > player_rect.top) and (rect.top < player_rect.bottom)
-            else:
-                w, h = rect.width, rect.height
-                cx, cy = rect.centerx, rect.centery
-                rad = math.radians(-angle)
-                cos_a, sin_a = math.cos(rad), math.sin(rad)
-                dx, dy = w / 2, h / 2
-                y_coords = []
-                for px, py in [(-dx, -dy), (dx, -dy), (dx, dy), (-dx, dy)]:
-                    ry = px * sin_a + py * cos_a + cy
-                    y_coords.append(ry)
-                min_y = min(y_coords)
-                max_y = max(y_coords)
-                return (max_y > player_rect.top) and (min_y < player_rect.bottom)
-        elif stype == "circle":
-            cx, cy, r = val
-            min_y = cy - r
-            max_y = cy + r
-            return (max_y > player_rect.top) and (min_y < player_rect.bottom)
-        return False
-
-    def get_attack_zone_shape_for_order_zone(self, o_idx):
-        if o_idx >= len(self.orders):
-            return None
-        det = self.orders[o_idx]
-        tz = det.get("trigger_zone", {})
-        shape = tz.get("shape", {})
-
-        stype = shape.get("type")
-        if not stype:
-            template_str = str(shape.get("template", ""))
-            if "circle" in template_str or "r" in shape:
-                stype = "circle"
-            else:
-                stype = "rectangle"
-
-        ox = safe_int(tz.get("offset_x"), 0)
-        oy = safe_int(tz.get("offset_y"), 0)
-        det_type = tz.get("type", "following")
-        angle = safe_int(tz.get("angle"), 0)
-
-        if stype == "rectangle":
-            w = safe_int(shape.get("w"), 150)
-            h = safe_int(shape.get("h"), 60)
-
-            if det_type == "following" and self.direction == -1:
-                abs_x = self.rect.left - ox - w
-                effective_angle = -angle
-            elif det_type == "following":
-                abs_x = self.rect.right + ox
-                effective_angle = angle
-            else:
-                abs_x = self.rect.x + ox
-                effective_angle = angle
-            abs_y = self.rect.y + oy
-
-            return ("rectangle", (pygame.Rect(safe_int(abs_x), safe_int(abs_y), w, h), effective_angle))
-
-        elif stype == "circle":
-            r = safe_int(shape.get("r"), 75)
-            if det_type == "following" and self.direction == -1:
-                cx = self.rect.left - ox - r
-            elif det_type == "following":
-                cx = self.rect.right + ox + r
-            else:
-                cx = self.rect.x + ox + r
-            cy = self.rect.y + oy + r
-            return ("circle", (safe_int(cx), safe_int(cy), r))
-        return None
-
-    def check_player_in_order_zone(self, player_rect, o_idx):
-        shape_data = self.get_attack_zone_shape_for_order_zone(o_idx)
-        if not shape_data:
-            return False
-        stype, val = shape_data
-        if stype == "rectangle":
-            rect, angle = val
-            if angle == 0:
-                return rect.colliderect(player_rect)
-            else:
-                player_poly = [
-                    (player_rect.left, player_rect.top),
-                    (player_rect.right, player_rect.top),
-                    (player_rect.right, player_rect.bottom),
-                    (player_rect.left, player_rect.bottom)
-                ]
-                w, h = rect.width, rect.height
-                cx, cy = rect.centerx, rect.centery
-                rad = math.radians(-angle)
-                cos_a, sin_a = math.cos(rad), math.sin(rad)
-                dx, dy = w / 2, h / 2
-                rect_poly = []
-                for px, py in [(-dx, -dy), (dx, -dy), (dx, dy), (-dx, dy)]:
-                    rx = px * cos_a - py * sin_a + cx
-                    ry = px * sin_a + py * cos_a + cy
-                    rect_poly.append((rx, ry))
-                return collides_polygon_polygon(player_poly, rect_poly)
-        elif stype == "circle":
-            cx, cy, r = val
-            closest_x = max(player_rect.left, min(cx, player_rect.right))
-            closest_y = max(player_rect.top, min(cy, player_rect.bottom))
-            distance_sq = (cx - closest_x)**2 + (cy - closest_y)**2
-            return distance_sq <= r**2
-        return False
+    def _get_rotated_rect_y_coords(self, rect, angle):
+        w, h = rect.width, rect.height
+        cx, cy = rect.centerx, rect.centery
+        rad = math.radians(-angle)
+        cos_a, sin_a = math.cos(rad), math.sin(rad)
+        dx, dy = w / 2, h / 2
+        y_coords = []
+        for px, py in [(-dx, -dy), (dx, -dy), (dx, dy), (-dx, dy)]:
+            ry = px * sin_a + py * cos_a + cy
+            y_coords.append(ry)
+        return y_coords
 </file>
 
 <file path="entities/enemy_parts/enemy_render.py">
@@ -7291,17 +7808,49 @@ class EnemyRenderMixin:
                     print(f"Error generating procedural attack_base_circle: {e}")
 
     def draw(self, surface, show_debug, player_rect, camera_x=0, camera_y=0, zoom=1.0, editing_trigger_idx=None, editing_attack_idx=None, editing_box_idx=None, inspector_tab=None, selected_move_idx=None, alpha_surf=None, game=None):
+        # 1. Отрисовка всех хитбоксов тела противника (Body Shapes)
+        body_shapes = self.get_body_shapes()
+        for b_idx, (stype, val) in enumerate(body_shapes):
+            if stype == "rectangle":
+                rect, angle = val
+                asx = CANVAS_OFFSET_X + (rect.x - camera_x) * zoom
+                asy = (rect.y - camera_y) * zoom
+                asw = max(1.0, rect.width * zoom)
+                ash = max(1.0, rect.height * zoom)
+
+                # Главное тело или дочерний хитбокс
+                draw_color = ENEMY_BODY_COLOR if b_idx == 0 else (ENEMY_BODY_COLOR[0]-20, ENEMY_BODY_COLOR[1]-20, ENEMY_BODY_COLOR[2]-20)
+
+                if angle == 0:
+                    pygame.draw.rect(surface, draw_color, (asx, asy, asw, ash))
+                else:
+                    cx = asx + asw / 2
+                    cy = asy + ash / 2
+                    rad = math.radians(-angle)
+                    cos_a, sin_a = math.cos(rad), math.sin(rad)
+                    dx, dy = asw / 2, ash / 2
+                    corners = []
+                    for px, py in [(-dx, -dy), (dx, -dy), (dx, dy), (-dx, dy)]:
+                        rx = px * cos_a - py * sin_a + cx
+                        ry = px * sin_a + py * cos_a + cy
+                        corners.append((int(rx), int(ry)))
+                    pygame.draw.polygon(surface, draw_color, corners)
+            elif stype == "circle":
+                cx, cy, r = val
+                scx = CANVAS_OFFSET_X + (cx - camera_x) * zoom
+                scy = (cy - camera_y) * zoom
+                sr = max(1.0, r * zoom)
+                pygame.draw.circle(surface, ENEMY_BODY_COLOR, (int(scx), int(scy)), int(sr))
+
+        # Отрисовка головы врага на базовом хитбоксе
         sx = CANVAS_OFFSET_X + (self.rect.x - camera_x) * zoom
         sy = (self.rect.y - camera_y) * zoom
         sw = max(1.0, self.rect.width * zoom)
         sh = max(1.0, self.rect.height * zoom)
         draw_rect = pygame.Rect(sx, sy, sw, sh)
 
-        pygame.draw.rect(surface, ENEMY_BODY_COLOR, draw_rect)
-
         head_h = max(2, int(sh * 0.25))
         head_rect = pygame.Rect(draw_rect.x, draw_rect.y, draw_rect.width, head_h)
-
         head_center_x = draw_rect.centerx
         head_center_y = draw_rect.y + head_h // 2
 
@@ -7527,60 +8076,7 @@ class EnemyRenderMixin:
                         else:
                             pygame.draw.circle(surface, (255, 120, 120), (int(asx + asw/2), int(asy + ash/2)), int(asw/2))
 
-        for act in getattr(self, "running_actions", []):
-            if act.get("type") == "movement":
-                for p in act.get("phases", []):
-                    if p.get("direction") == "teleport":
-                        delay = p.get("delay", 0)
-                        if act.get("timeline_timer", 0) <= delay:
-                            dx = p.get("force_x", 0.0)
-                            dy = p.get("force_y", 0.0)
-                            start_cx = self.rect.centerx
-                            start_cy = self.rect.centery
-                            is_real_player = (player_rect is not None and player_rect.width > 0 and player_rect.x >= 0)
-                            if is_real_player:
-                                dir_to_player = 1 if player_rect.centerx >= start_cx else -1
-                            else:
-                                dir_to_player = self.direction
-
-                            target_cx = start_cx + int(dx * dir_to_player)
-                            target_cy = start_cy + int(dy)
-                            sx1 = CANVAS_OFFSET_X + (start_cx - camera_x) * zoom
-                            sy1 = (start_cy - camera_y) * zoom
-                            sx2 = CANVAS_OFFSET_X + (target_cx - camera_x) * zoom
-                            sy2 = (target_cy - camera_y) * zoom
-
-                            line_color = (180, 80, 255)
-                            pygame.draw.line(surface, line_color, (int(sx1), int(sy1)), (int(sx2), int(sy2)), max(1, int(2 * zoom)))
-                            pygame.draw.circle(surface, line_color, (int(sx2), int(sy2)), max(4, int(7 * zoom)))
-                            pygame.draw.circle(surface, (255, 255, 255), (int(sx2), int(sy2)), max(1, int(3 * zoom)))
-
-        if inspector_tab == "DETAILED_MOVEMENT" and selected_move_idx is not None and selected_move_idx < len(self.movements):
-            m_template = self.movements[selected_move_idx]
-            for p in m_template.get("phases", []):
-                if p.get("direction") == "teleport":
-                    dx = p.get("force_x", 0.0)
-                    dy = p.get("force_y", 0.0)
-                    start_cx = self.rect.centerx
-                    start_cy = self.rect.centery
-                    is_real_player = (player_rect is not None and player_rect.width > 0 and player_rect.x >= 0)
-                    if is_real_player:
-                        dir_to_player = 1 if player_rect.centerx >= start_cx else -1
-                    else:
-                        dir_to_player = self.direction
-
-                    target_cx = start_cx + int(dx * dir_to_player)
-                    target_cy = start_cy + int(dy)
-                    sx1 = CANVAS_OFFSET_X + (start_cx - camera_x) * zoom
-                    sy1 = (start_cy - camera_y) * zoom
-                    sx2 = CANVAS_OFFSET_X + (target_cx - camera_x) * zoom
-                    sy2 = (target_cy - camera_y) * zoom
-
-                    line_color = (255, 100, 255)
-                    pygame.draw.line(surface, line_color, (int(sx1), int(sy1)), (int(sx2), int(sy2)), max(1, int(2 * zoom)))
-                    pygame.draw.circle(surface, line_color, (int(sx2), int(sy2)), max(4, int(7 * zoom)))
-                    pygame.draw.circle(surface, (255, 255, 255), (int(sx2), int(sy2)), max(1, int(3 * zoom)))
-
+        # Отрисовка телепортационных кривых и зон удержания в дебаг-режиме
         if show_debug:
             local_surf = alpha_surf if alpha_surf is not None else pygame.Surface(surface.get_size(), pygame.SRCALPHA)
 
@@ -7589,45 +8085,17 @@ class EnemyRenderMixin:
             pygame.draw.circle(surface, (100, 255, 100), (int(CANVAS_OFFSET_X + (self.min_x - camera_x) * zoom), int(line_y)), max(1, int(4 * zoom)))
             pygame.draw.circle(surface, (100, 255, 100), (int(CANVAS_OFFSET_X + (self.max_x - camera_x) * zoom), int(line_y)), max(1, int(4 * zoom)))
 
-            stop_dist = 0
-            is_stop_visible = False
-
-            if inspector_tab == "MOVEMENT":
-                stop_dist = self.config.get("movement_config", {}).get("stop_dist", 60)
-                is_stop_visible = True
-            elif inspector_tab == "DETAILED_MOVEMENT" and selected_move_idx is not None and selected_move_idx < len(self.movements):
-                stop_dist = self.movements[selected_move_idx].get("stop_dist", 0)
-                is_stop_visible = True
-
-            if is_stop_visible and stop_dist > 0:
-                scx = CANVAS_OFFSET_X + (self.rect.centerx - camera_x) * zoom
-                sz_w = max(1.0, stop_dist * 2 * zoom)
-                sz_h = max(1.0, self.rect.height * zoom)
-                sz_x = scx - sz_w / 2
-                sz_y = (self.rect.y - camera_y) * zoom
-
-                yellow_fill = pygame.Surface((sz_w, sz_h), pygame.SRCALPHA)
-                yellow_fill.fill((255, 255, 0, 35))
-                surface.blit(yellow_fill, (sz_x, sz_y))
-                pygame.draw.rect(surface, (255, 255, 0), (sz_x, sz_y, sz_w, sz_h), 2)
-
-                font_size = max(8, int(11 * zoom))
-                font_stop = game.get_cached_font(font_size) if game else pygame.font.SysFont(None, font_size)
-                stop_lbl = font_stop.render(f"Stop Range: {stop_dist}", True, (255, 255, 0))
-                surface.blit(stop_lbl, (sz_x + 5 * zoom, sz_y + 5 * zoom))
-
-            det_data = self.get_detection_shape()
-            if det_data:
-                stype, val = det_data
-                is_alert = self.check_player_detected(player_rect)
-                color = (255, 100, 100) if is_alert else (255, 255, 100)
+            # Отрисовка зон детекции/зрения (Detection Shapes)
+            det_shapes = self.get_detection_shapes()
+            is_alert = self.check_player_detected(player_rect)
+            color = (255, 100, 100) if is_alert else (255, 255, 100)
+            for stype, val in det_shapes:
                 if stype == "rectangle":
                     rect, angle = val
                     asx = CANVAS_OFFSET_X + (rect.x - camera_x) * zoom
                     asy = (rect.y - camera_y) * zoom
                     asw = rect.width * zoom
                     ash = rect.height * zoom
-
                     if angle == 0:
                         pygame.draw.rect(surface, color, (asx, asy, asw, ash), 1)
                     else:
@@ -7649,40 +8117,49 @@ class EnemyRenderMixin:
                     sr = r * zoom
                     pygame.draw.circle(surface, color, (int(scx), int(scy)), int(sr), 1)
 
-            # Рендеринг оранжевых триггерных зон последовательностей
-            for z_idx, zone in enumerate(self.trigger_zones):
-                # Скрываем триггер-бокс, если он привязан к Order
+            # Отрисовка зон остановки (Root -> Stopping Shapes)
+            stop_shapes = self.get_stop_shapes()
+            is_stopped = self.check_player_in_stop_zone(player_rect)
+            stop_color = (0, 255, 100) if is_stopped else (0, 200, 80)
+            for stype, val in stop_shapes:
+                if stype == "rectangle":
+                    rect, angle = val
+                    asx = CANVAS_OFFSET_X + (rect.x - camera_x) * zoom
+                    asy = (rect.y - camera_y) * zoom
+                    asw = rect.width * zoom
+                    ash = rect.height * zoom
+                    if angle == 0:
+                        pygame.draw.rect(surface, stop_color, (asx, asy, asw, ash), 1)
+                    else:
+                        cx = asx + asw / 2
+                        cy = asy + ash / 2
+                        rad = math.radians(-angle)
+                        cos_a, sin_a = math.cos(rad), math.sin(rad)
+                        dx, dy = asw / 2, ash / 2
+                        corners = []
+                        for px, py in [(-dx, -dy), (dx, -dy), (dx, dy), (-dx, dy)]:
+                            rx = px * cos_a - py * sin_a + cx
+                            ry = px * sin_a + py * cos_a + cy
+                            corners.append((int(rx), int(ry)))
+                        pygame.draw.polygon(surface, stop_color, corners, 1)
+                elif stype == "circle":
+                    cx, cy, r = val
+                    scx = CANVAS_OFFSET_X + (cx - camera_x) * zoom
+                    scy = (cy - camera_y) * zoom
+                    sr = r * zoom
+                    pygame.draw.circle(surface, stop_color, (int(scx), int(scy)), int(sr), 1)
+
+            # Отрисовка триггеров Sequences
+            for z_idx in range(len(self.sequences)):
                 if z_idx in getattr(self, "connected_seq_indices", set()):
                     continue
 
                 is_active_trigger_edit = (inspector_tab == "K-FRAMES" and editing_trigger_idx == z_idx)
 
-                is_in_flow = any(
-                    (step.get("is_random", False) and z_idx in step.get("seq_pool", [])) or
-                    (not step.get("is_random", False) and z_idx == step.get("seq_idx", 0))
-                    for flow in self.flows
-                    for step in flow.get("steps", []))
-
-                if is_in_flow and not is_active_trigger_edit:
-                    continue
-
-                atk_zone_data = self.get_attack_zone_shape_for_attack_zone(z_idx)
-                if atk_zone_data:
-                    stype, val = atk_zone_data
+                atk_zone_data = self.get_attack_zone_shapes_for_sequence(z_idx)
+                for stype, val in atk_zone_data:
                     is_alert = self.check_player_in_zone(player_rect, z_idx)
                     base_color = (255, 60, 0) if is_alert else (255, 150, 0)
-
-                    seq = self.sequences[z_idx] if z_idx < len(self.sequences) else {}
-                    req_hold = seq.get("trigger_zone", {}).get("hold_time", 0)
-
-                    key = f"seq_{z_idx}"
-                    current_hold = getattr(self, "trigger_hold_timers", {}).get(key, 0)
-                    consec = getattr(self, "consecutive_triggers", {}).get(key, 0)
-                    limit = zone.get("consecutive_limit", 3)
-
-                    if req_hold > 0 and current_hold > 0:
-                        progress = min(1.0, current_hold / req_hold)
-                        base_color = (int(255 * (1.0 - progress)), int(60 + 180 * progress), int(255 * progress))
 
                     if not is_active_trigger_edit:
                         draw_color = (*base_color, 64)
@@ -7722,20 +8199,13 @@ class EnemyRenderMixin:
                         pygame.draw.circle(target_draw_surface, draw_color, (int(scx), int(scy)), int(sr), 1)
                         draw_x, draw_y = int(scx - sr), int(scy - sr)
 
-                    font_size = max(8, int(11 * zoom))
-                    font_hold = game.get_cached_font(font_size) if game else pygame.font.SysFont(None, font_size)
-                    hold_lbl = font_hold.render(f"Hold: {current_hold}/{req_hold} (Atk: {consec}/{limit})", True, base_color)
-                    surface.blit(hold_lbl, (draw_x + 5 * zoom, draw_y + 5 * zoom))
-
-            # Рендеринг голубых триггерных зон потоков поведения (Flows)
+            # Отрисовка триггеров Flows
             for f_idx, flow in enumerate(self.flows):
-                # Скрываем триггер-бокс, если он привязан к Order
                 if f_idx in getattr(self, "connected_flow_indices", set()):
                     continue
 
-                flow_zone_data = self.get_attack_zone_shape_for_flow_zone(f_idx)
-                if flow_zone_data:
-                    stype, val = flow_zone_data
+                flow_zone_data = self.get_attack_zone_shapes_for_flow(f_idx)
+                for stype, val in flow_zone_data:
                     is_alert = self.check_player_in_flow_zone(player_rect, f_idx)
                     base_color = (0, 240, 255) if is_alert else (0, 150, 200)
 
@@ -7779,24 +8249,11 @@ class EnemyRenderMixin:
                         pygame.draw.circle(target_draw_surface, draw_color, (int(scx), int(scy)), int(sr), 1)
                         draw_x, draw_y = int(scx - sr), int(scy - sr)
 
-                    trig_z = flow.get("trigger_zone", {})
-                    req_hold = trig_z.get("hold_time", 0)
-                    key = f"flow_{f_idx}"
-                    current_hold = getattr(self, "trigger_hold_timers", {}).get(key, 0)
-                    consec = getattr(self, "consecutive_triggers", {}).get(key, 0)
-                    limit = trig_z.get("consecutive_limit", 3)
-
-                    font_size = max(8, int(11 * zoom))
-                    font_flow = game.get_cached_font(font_size) if game else pygame.font.SysFont(None, font_size)
-                    flow_lbl = font_flow.render(f"Flow: {flow.get('name', 'Combo')} [{current_hold}/{req_hold} (Atk: {consec}/{limit})]", True, base_color)
-                    surface.blit(flow_lbl, (draw_x + 5 * zoom, draw_y + 5 * zoom))
-
-            # Рендеринг фиолетовых триггерных зон цепочек порядка (Orders)
+            # Отрисовка триггеров Orders
             editing_order_idx = game.selected_order_idx if game else None
             for o_idx, order in enumerate(getattr(self, "orders", [])):
-                order_zone_data = self.get_attack_zone_shape_for_order_zone(o_idx)
-                if order_zone_data:
-                    stype, val = order_zone_data
+                order_zone_data = self.get_attack_zone_shapes_for_order(o_idx)
+                for stype, val in order_zone_data:
                     is_alert = self.check_player_in_order_zone(player_rect, o_idx)
                     base_color = (180, 50, 255) if is_alert else (120, 30, 200)
 
@@ -7840,19 +8297,7 @@ class EnemyRenderMixin:
                         pygame.draw.circle(target_draw_surface, draw_color, (int(scx), int(scy)), int(sr), 1)
                         draw_x, draw_y = int(scx - sr), int(scy - sr)
 
-                    trig_z = order.get("trigger_zone", {})
-                    req_hold = trig_z.get("hold_time", 0)
-                    key = f"order_{o_idx}"
-                    current_hold = getattr(self, "trigger_hold_timers", {}).get(key, 0)
-                    consec = getattr(self, "consecutive_triggers", {}).get(key, 0)
-                    limit = trig_z.get("consecutive_limit", 3)
-
-                    font_size = max(8, int(11 * zoom))
-                    font_order = game.get_cached_font(font_size) if game else pygame.font.SysFont(None, font_size)
-                    order_lbl = font_order.render(f"Order: {order.get('name', 'Seq')} [{current_hold}/{req_hold} (Atk: {consec}/{limit})]", True, base_color)
-                    surface.blit(order_lbl, (draw_x + 5 * zoom, draw_y + 5 * zoom))
-
-            # Рендеринг хитбоксов урона атак
+            # Отрисовка хитбоксов атак
             for a_idx, att in enumerate(self.attacks):
                 shapes_data = self.get_attack_shapes_by_index(a_idx)
                 is_active_edit = (self.is_swinging and self.active_attack_idx == a_idx) or (editing_attack_idx is not None and a_idx == editing_attack_idx)
@@ -7916,34 +8361,6 @@ class EnemyRenderMixin:
                             label_color = (255, 180, 180)
                             att_lbl = font_att.render(f"Box #{s_idx+1} [Del:{delay}]", True, label_color)
                         surface.blit(att_lbl, (draw_x + 3 * zoom, draw_y + 3 * zoom))
-
-                    for s_idx, s_data in enumerate(att.get("shapes", [])):
-                        vis_box = s_data.get("visual_box")
-                        if vis_box and is_active_edit:
-                            v_type = vis_box.get("type", "rectangle")
-                            v_ox = vis_box.get("offset_x", 0)
-                            v_oy = vis_box.get("offset_y", 0)
-
-                            if v_type == "circle":
-                                v_r = vis_box.get("r", 25)
-                                v_cx = self.rect.centerx + (v_ox * self.direction)
-                                v_cy = self.rect.centery + v_oy
-                                scx = CANVAS_OFFSET_X + (v_cx - camera_x) * zoom
-                                scy = (v_cy - camera_y) * zoom
-                                sr = v_r * zoom
-                                pygame.draw.circle(surface, (180, 100, 255), (int(scx), int(scy)), int(sr), 2)
-                            else:
-                                v_w = vis_box.get("w", 50)
-                                v_h = vis_box.get("h", 40)
-                                v_rect_cx = self.rect.centerx + (v_ox * self.direction)
-                                v_rect_cy = self.rect.centery + v_oy
-                                v_abs_x = v_rect_cx - v_w / 2
-                                v_abs_y = v_rect_cy - v_h / 2
-                                asx = CANVAS_OFFSET_X + (v_abs_x - camera_x) * zoom
-                                asy = (v_abs_y - camera_y) * zoom
-                                asw = v_w * zoom
-                                ash = v_h * zoom
-                                pygame.draw.rect(surface, (180, 100, 255), (asx, asy, asw, ash), 2)
 
             if alpha_surf is None:
                 surface.blit(local_surf, (0, 0))

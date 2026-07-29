@@ -18,6 +18,40 @@ class TestNodeEditorLogic(unittest.TestCase):
     def setUp(self):
         # Очищаем вызовы мока перед каждым тестом
         dpg_mock.reset_mock()
+        
+        # Настраиваем генератор уникальных ID для Dear PyGui функций,
+        # чтобы вызовы add_node, add_node_attribute и т.д. возвращали разные значения
+        # вместо одного и того же Mock-объекта (что приводило к перезаписи ключей в словарях)
+        id_counter = 0
+        def get_unique_id(*args, **kwargs):
+            nonlocal id_counter
+            id_counter += 1
+            return id_counter
+            
+        dpg_mock.add_node.side_effect = get_unique_id
+        dpg_mock.add_node_attribute.side_effect = get_unique_id
+        dpg_mock.add_node_link.side_effect = get_unique_id
+
+        # Динамические моки для метода sync_with_dpg, чтобы он не удалял созданные ноды и линки
+        def get_item_children_mock(tag, slot):
+            if tag == "editor_tag":
+                if slot == 1:  # mvNode
+                    return list(self.editor.nodes_data.keys())
+                elif slot == 0:  # mvNodeLink
+                    return list(self.editor.links_data.keys())
+            return []
+
+        def get_item_type_mock(item):
+            if item in self.editor.nodes_data:
+                return "mvAppItemType::mvNode"
+            if item in self.editor.links_data:
+                return "mvAppItemType::mvNodeLink"
+            return ""
+
+        dpg_mock.get_item_children.side_effect = get_item_children_mock
+        dpg_mock.get_item_type.side_effect = get_item_type_mock
+        dpg_mock.does_item_exist.return_value = True
+
         self.editor = NodeEditor()
 
     def test_node_and_pin_data_structures(self):
@@ -102,6 +136,35 @@ class TestNodeEditorLogic(unittest.TestCase):
         # 4. Клик в область угла (например, верхний правый угол 145, 78) -> поворот ('rotate')
         mode_corner = self.editor._hit_test_shape(rect_info, 145, 78)
         self.assertEqual(mode_corner, "rotate")
+
+    def test_import_export_json_roundtrip(self):
+        """Проверка полного цикла импорта из JSON и последующего экспорта в граф."""
+        preset_data = {
+            "hp": 5,
+            "name": "Export Test Enemy",
+            "body": {"w": 40, "h": 60},
+            "movement_config": {"type_move": "walking", "speed": 1.2},
+            "attacks": [
+                {
+                    "name": "Jab", "cooldown": 30, "windup": 10,
+                    "shapes": [{"shape": {"type": "rectangle", "w": 30, "h": 20}, "offset_x": 10, "offset_y": 0}]
+                }
+            ]
+        }
+        self.editor.import_json_to_graph(preset_data)
+        exported = self.editor.export_graph_to_json()
+        
+        self.assertIsNotNone(exported)
+        self.assertEqual(exported["hp"], 5)
+        self.assertEqual(len(exported["attacks"]), 1)
+        self.assertEqual(exported["attacks"][0]["name"], "Jab")
+
+    def test_auto_arrange(self):
+        """Проверка вызова метода авто-расстановки узлов на холсте."""
+        self.editor.create_root_node()
+        self.editor.create_attack_node()
+        self.editor.auto_arrange()
+        self.assertTrue(dpg_mock.set_item_pos.called)
 
     def test_export_structure_without_root(self):
         """Проверка того, что экспорт возвращает None, если отсутствует узел Root."""

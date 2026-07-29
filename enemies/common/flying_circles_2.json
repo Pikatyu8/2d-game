@@ -1,0 +1,196 @@
+{
+    "hp": 7,
+    "body": {
+        "template": "forms.rect",
+        "w": 30,
+        "h": 30
+    },
+    "movement_config": {
+        "type_move": "flying",
+        "speed": 2.4,
+        "range_x": 120,
+        "stop_dist": 60,
+        "patrol_on_platform": false
+    },
+    "detection": {
+        "template": "detections.radius_view",
+        "shape": {
+            "template": "forms.circle",
+            "type": "circle",
+            "r": 225
+        },
+        "offset_x": -210,
+        "offset_y": -211,
+        "angle": 0
+    },
+    "projectiles": [
+        {
+            "name": "Proj Template 1",
+            "speed": 7.0,
+            "angle": 0.0,
+            "gravity": 0.0,
+            "damage": 1,
+            "radius": 8,
+            "aim_at_player": true,
+            "homing": 0.1,
+            "shoot_cooldown": 0
+        }
+    ],
+    "attacks": [
+        {
+            "name": "Bite",
+            "cooldown": 40,
+            "windup": 30,
+            "shapes": [
+                {
+                    "shape": {
+                        "template": "forms.circle",
+                        "type": "circle",
+                        "r": 125
+                    },
+                    "offset_x": -141,
+                    "offset_y": -110,
+                    "angle": 0,
+                    "delay": 30,
+                    "duration": 10,
+                    "damage": 1,
+                    "kb_angle_hit": 0,
+                    "kb_force_hit": 12.0,
+                    "kb_angle_parry": 0,
+                    "kb_force_parry": 6.0,
+                    "sprite_dir": "forward"
+                }
+            ]
+        }
+    ],
+    "movements": [],
+    "sequences": [
+        {
+            "name": "Seq 1",
+            "chance": 0.5,
+            "cooldown": 120,
+            "post_cooldown": 0,
+            "trigger_zone": {
+                "shape": {
+                    "template": "forms.circle",
+                    "type": "circle",
+                    "r": 87
+                },
+                "offset_x": -104,
+                "offset_y": -73,
+                "type": "following",
+                "hold_time": 0,
+                "consecutive_limit": 3,
+                "accumulate_hold": true
+            },
+            "steps": [
+                {
+                    "type": "attack",
+                    "idx": 0,
+                    "delay": 0,
+                    "trigger": "time"
+                }
+            ]
+        },
+        {
+            "name": "Seq 2",
+            "chance": 0.5,
+            "cooldown": 30,
+            "post_cooldown": 0,
+            "trigger_zone": {
+                "shape": {
+                    "template": "forms.rect",
+                    "type": "rectangle",
+                    "w": 290,
+                    "h": 190
+                },
+                "offset_x": -160,
+                "offset_y": -80,
+                "type": "following",
+                "hold_time": 40,
+                "consecutive_limit": 3,
+                "accumulate_hold": true
+            },
+            "steps": [
+                {
+                    "type": "projectile",
+                    "idx": 0,
+                    "delay": 0
+                }
+            ]
+        }
+    ],
+    "flows": [],
+    "orders": [
+        {
+            "name": "Order 1",
+            "pos": [
+                1108,
+                61
+            ],
+            "chance": 1.0,
+            "cooldown": 60,
+            "post_cooldown": 30,
+            "trigger_zone": {
+                "shape": {
+                    "template": "forms.circle",
+                    "type": "circle",
+                    "r": 117
+                },
+                "offset_x": -132,
+                "offset_y": -102,
+                "type": "following",
+                "hold_time": 0,
+                "consecutive_limit": 3,
+                "accumulate_hold": true
+            },
+            "steps": [
+                {
+                    "index": 1,
+                    "connections": [
+                        {
+                            "type": "Sequence",
+                            "name": "Seq 1"
+                        }
+                    ]
+                },
+                {
+                    "index": 2,
+                    "connections": [
+                        {
+                            "type": "Sequence",
+                            "name": "Seq 2"
+                        }
+                    ]
+                },
+                {
+                    "index": 3,
+                    "connections": [
+                        {
+                            "type": "Sequence",
+                            "name": "Seq 2"
+                        }
+                    ]
+                },
+                {
+                    "index": 4,
+                    "connections": [
+                        {
+                            "type": "Sequence",
+                            "name": "Seq 2"
+                        }
+                    ]
+                },
+                {
+                    "index": 5,
+                    "connections": [
+                        {
+                            "type": "Sequence",
+                            "name": "Seq 1"
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}
