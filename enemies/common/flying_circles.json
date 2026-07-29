@@ -83,7 +83,7 @@
                         "r": 8
                     },
                     "offset_x": 0,
-                    "offset_y": 0,
+                    "offset_y": -1,
                     "angle": 0
                 }
             ]
